@@ -97,6 +97,15 @@ export default function RegisterScreen() {
     }
   };
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/login");
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top", "bottom"]}>
       <KeyboardAvoidingView
@@ -108,7 +117,7 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <View className="px-4 pt-5 pb-3 flex-row items-center gap-3">
-            <TouchableOpacity onPress={() => router.back()}>
+            <TouchableOpacity onPress={handleBack}>
               <ArrowLeft size={22} color="#1a1a1a" strokeWidth={2.2} />
             </TouchableOpacity>
             <Text className="text-lg font-bold text-primary">Đăng ký tài khoản</Text>

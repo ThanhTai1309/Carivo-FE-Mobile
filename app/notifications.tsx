@@ -71,11 +71,20 @@ export default function NotificationsScreen() {
     );
   }
 
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/(tabs)/profile");
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <View className="px-4 pt-5 pb-3 flex-row items-center justify-between">
         <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={handleBack}>
             <ArrowLeft size={22} color="#1a1a1a" strokeWidth={2.2} />
           </TouchableOpacity>
           <Text className="text-lg font-bold text-primary">Thông báo</Text>

@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Bell, Info, Plus, User } from "lucide-react-native";
+import { ArrowLeft, Bell, Info, Plus, User } from "lucide-react-native";
 import { useRouter } from "expo-router";
 import VehicleCard from "@/components/vehicles/VehicleCard";
 import ScreenState from "@/components/common/ScreenState";
@@ -137,6 +137,19 @@ export default function MyVehiclesScreen() {
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <View className="flex-row items-center justify-between px-4 pt-5 pb-3">
         <View className="flex-row items-center gap-2">
+          <TouchableOpacity
+            onPress={() => {
+              if (router.canGoBack()) {
+                router.back();
+                return;
+              }
+
+              router.replace("/(tabs)/profile");
+            }}
+            className="w-9 h-9 rounded-full bg-card border border-border items-center justify-center"
+          >
+            <ArrowLeft size={18} color="#0d0d0d" strokeWidth={2.4} />
+          </TouchableOpacity>
           <View className="w-9 h-9 rounded-full bg-secondary items-center justify-center">
             <User size={18} color="#1a5fd4" strokeWidth={2.7} />
           </View>

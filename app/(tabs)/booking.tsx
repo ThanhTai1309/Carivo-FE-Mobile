@@ -198,12 +198,20 @@ export default function BookingScreen() {
 
   const totalPrice = selectedService?.base_price ?? 0;
   const canContinue = Boolean(selectedGarage && selectedService && selectedSlot);
+  const handleBack = () => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/(tabs)");
+  };
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <View className="flex-row items-center justify-between px-4 pt-5 pb-3 bg-background">
         <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={() => router.back()}>
+          <TouchableOpacity onPress={handleBack}>
             <ArrowLeft size={22} color="#1a1a1a" strokeWidth={2.2} />
           </TouchableOpacity>
           <Text className="text-lg font-bold text-primary">Đặt lịch rửa xe</Text>
