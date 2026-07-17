@@ -40,6 +40,7 @@ export default function PaymentScreen() {
     vehiclePlate?: string;
     startTime?: string;
     price?: string;
+    addOnIds?: string;
   }>();
   const { accessToken, isAuthenticated } = useApp();
   const [selectedPayment, setSelectedPayment] = useState("card");
@@ -227,10 +228,19 @@ export default function PaymentScreen() {
 
     setSubmitting(true);
     try {
+      const addOnIdsRaw = params.addOnIds ?? "";
+      const addOnServiceIds = addOnIdsRaw
+        ? addOnIdsRaw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+
       const response = await api.createBooking(accessToken, {
         garage_id: params.garageId,
         vehicle_id: params.vehicleId,
         service_package_id: params.servicePackageId,
+        add_on_service_ids: addOnServiceIds,
         start_time: params.startTime,
         promotion_code: appliedPromo?.promotion.code,
         used_points: Number(usedPoints || 0) || undefined,
