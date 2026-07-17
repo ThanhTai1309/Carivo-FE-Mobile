@@ -64,7 +64,6 @@ export default function PaymentScreen() {
       try {
         const query: Record<string, QueryValue> = {
           limit: 50,
-          is_active: true,
         };
         const promotionsResponse = await api.getPromotions(query);
         setPromotions(promotionsResponse.data ?? []);

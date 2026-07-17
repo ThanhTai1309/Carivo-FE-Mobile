@@ -98,14 +98,6 @@ function isActivePromotion(promo: Promotion): boolean {
     const end = new Date(promo.end_at).getTime();
     if (!Number.isNaN(end) && now > end) return false;
   }
-  if (
-    typeof promo.usage_limit === "number" &&
-    typeof promo.usage_count === "number" &&
-    promo.usage_limit > 0 &&
-    promo.usage_count >= promo.usage_limit
-  ) {
-    return false;
-  }
   return true;
 }
 
@@ -468,7 +460,6 @@ export default function RewardsScreen() {
     try {
       const query: Record<string, QueryValue> = {
         limit: 30,
-        is_active: true,
       };
 
       const [summaryResponse, transactionsResponse, rulesResponse, promoResponse] =
