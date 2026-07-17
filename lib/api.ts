@@ -22,7 +22,7 @@ import type {
 
 const API_ROOT = "https://wdp301-project-backend.onrender.com/api/v1";
 
-type QueryValue = string | number | boolean | null | undefined | string[];
+export type QueryValue = string | number | boolean | null | undefined | string[];
 
 export class ApiError extends Error {
   status: number;
