@@ -1,22 +1,53 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   RefreshControl,
   ScrollView,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { Bell, CarFront, History, LogOut, Pencil, User2 } from "lucide-react-native";
+import * as ImagePicker from "expo-image-picker";
+import {
+  Bell,
+  CarFront,
+  ChevronRight,
+  CircleHelp,
+  CircleUserRound,
+  History,
+  Info,
+  KeyRound,
+  LogOut,
+  Pencil,
+  Phone,
+  Settings as SettingsIcon,
+} from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
-import { compactName, formatCurrency, formatDateTime } from "@/lib/format";
+import { compactName, formatDateTime, formatCurrency } from "@/lib/format";
 import type { Booking, NotificationItem, WashHistory } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
+
+interface MenuItem {
+  icon: React.ComponentType<{
+    size: number;
+    color: string;
+    strokeWidth: number;
+  }>;
+  label: string;
+  value?: string;
+  destructive?: boolean;
+  onPress: () => void;
+}
+
+interface MenuSection {
+  title?: string;
+  items: MenuItem[];
+}
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -24,22 +55,22 @@ export default function ProfileScreen() {
     accessToken,
     authUser,
     isAuthenticated,
+    isHydrated,
     logout,
     profile,
     refreshProfile,
     updateProfile,
+    uploadImage,
   } = useApp();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [histories, setHistories] = useState<WashHistory[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [fullName, setFullName] = useState(profile?.full_name ?? "");
-  const [email, setEmail] = useState(profile?.email ?? "");
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarVersion, setAvatarVersion] = useState(0);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!isAuthenticated || !accessToken) {
       setLoading(false);
       return;
@@ -64,16 +95,64 @@ export default function ProfileScreen() {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [accessToken, isAuthenticated, refreshProfile]);
+
+  useEffect(() => {
+    if (isHydrated) {
+      void loadData();
+    }
+  }, [isHydrated, loadData]);
+
+  const handlePickAvatar = async () => {
+    if (avatarBusy) return;
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert(
+          "Quyền truy cập ảnh",
+          "Cần cấp quyền để thay đổi ảnh đại diện."
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled || result.assets.length === 0) return;
+
+      const asset = result.assets[0];
+      setAvatarBusy(true);
+      try {
+        const uploaded = await uploadImage(asset.uri, asset.mimeType ?? "image/jpeg");
+        await updateProfile({ avatar_url: uploaded.url });
+        setAvatarVersion((v) => v + 1);
+        Alert.alert("Thành công", "Đã cập nhật ảnh đại diện.");
+      } finally {
+        setAvatarBusy(false);
+      }
+    } catch (error) {
+      const message =
+        error instanceof ApiError ? error.message : "Không thể cập nhật ảnh.";
+      Alert.alert("Lỗi cập nhật ảnh", message);
+    }
   };
 
-  useEffect(() => {
-    void loadData();
-  }, [accessToken, isAuthenticated]);
-
-  useEffect(() => {
-    setFullName(profile?.full_name ?? authUser?.full_name ?? "");
-    setEmail(profile?.email ?? authUser?.email ?? "");
-  }, [authUser?.email, authUser?.full_name, profile?.email, profile?.full_name]);
+  if (!isHydrated) {
+    return (
+      <SafeAreaView className="flex-1 bg-background">
+        <ScreenState
+          loading
+          title="Đang tải hồ sơ"
+          description="Đang khôi phục phiên đăng nhập."
+        />
+      </SafeAreaView>
+    );
+  }
 
   if (!isAuthenticated) {
     return (
@@ -100,11 +179,80 @@ export default function ProfileScreen() {
     );
   }
 
+  const displayName =
+    profile?.full_name?.trim() ||
+    authUser?.full_name?.trim() ||
+    "Khách hàng";
+  const displayEmail =
+    profile?.email?.trim() || authUser?.email?.trim() || "";
+  const displayPhone =
+    profile?.phone?.trim() || authUser?.phone?.trim() || "";
+  const avatarUrl = profile?.avatar_url || authUser?.avatar_url || null;
+  const unreadCount = notifications.filter(
+    (item) => item.in_app_status !== "READ"
+  ).length;
+
+  const sections: MenuSection[] = [
+    {
+      title: "Tài khoản",
+      items: [
+        {
+          icon: Pencil,
+          label: "Chỉnh sửa hồ sơ",
+          onPress: () => router.push("/edit-profile"),
+        },
+        {
+          icon: KeyRound,
+          label: "Đổi mật khẩu",
+          onPress: () => router.push("/settings"),
+        },
+        {
+          icon: CarFront,
+          label: "Phương tiện của tôi",
+          value: `${bookings.length ? "Xem tất cả" : "Chưa có"}`,
+          onPress: () => router.push("/my-vehicles"),
+        },
+      ],
+    },
+    {
+      title: "Hoạt động",
+      items: [
+        {
+          icon: Bell,
+          label: "Thông báo",
+          value: unreadCount > 0 ? `${unreadCount} mới` : "Đã xem",
+          onPress: () => router.push("/notifications"),
+        },
+        {
+          icon: History,
+          label: "Lịch sử rửa xe",
+          value: `${histories.length}`,
+          onPress: () => router.push("/(tabs)/profile"),
+        },
+      ],
+    },
+    {
+      title: "Hỗ trợ",
+      items: [
+        {
+          icon: CircleHelp,
+          label: "Trợ giúp & Liên hệ",
+          onPress: () => router.push("/help"),
+        },
+        {
+          icon: Info,
+          label: "Về Carivo",
+          onPress: () => router.push("/about"),
+        },
+      ],
+    },
+  ];
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <ScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: 32 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -115,211 +263,364 @@ export default function ProfileScreen() {
           />
         }
       >
-        <View className="px-4 pt-5 pb-3 flex-row items-center justify-between">
-          <View className="flex-row items-center gap-3">
-            <View className="w-11 h-11 rounded-xl bg-secondary items-center justify-center">
-              <User2 size={22} color="#1a5fd4" strokeWidth={2.2} />
-            </View>
-            <View>
-              <Text className="text-sm text-muted-foreground">Xin chào</Text>
-              <Text className="text-xl font-bold text-foreground">
-                {compactName(profile?.full_name ?? authUser?.full_name)}
-              </Text>
-            </View>
-          </View>
-          <TouchableOpacity onPress={() => router.push("/notifications")}>
-            <Bell size={20} color="#1a1a1a" strokeWidth={2.2} />
-          </TouchableOpacity>
-        </View>
-
-        <View className="mx-4 rounded-2xl bg-card p-5">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-lg font-bold text-foreground">Thông tin cá nhân</Text>
-            <TouchableOpacity onPress={() => setEditing((current) => !current)}>
-              <Pencil size={18} color="#1a5fd4" strokeWidth={2.2} />
+        {/* Header */}
+        <View className="px-5 pt-5 pb-6">
+          <View className="flex-row items-center justify-between mb-5">
+            <Text className="text-2xl font-bold text-foreground">
+              Tài khoản của tôi
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push("/settings")}
+              className="w-10 h-10 rounded-full bg-card items-center justify-center"
+            >
+              <SettingsIcon size={18} color="#1a1a1a" strokeWidth={2.2} />
             </TouchableOpacity>
           </View>
 
-          {editing ? (
-            <View className="mt-4 gap-3">
-              <TextInput
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder="Họ và tên"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-border bg-input px-4 py-3 text-foreground"
-              />
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                placeholder="Email"
-                placeholderTextColor="#94a3b8"
-                className="rounded-xl border border-border bg-input px-4 py-3 text-foreground"
-              />
-              <TouchableOpacity
-                disabled={submitting}
-                onPress={async () => {
-                  setSubmitting(true);
-                  try {
-                    await updateProfile({
-                      full_name: fullName || undefined,
-                      email: email || null,
-                    });
-                    setEditing(false);
-                    await loadData();
-                  } catch (error) {
-                    const message =
-                      error instanceof ApiError
-                        ? error.message
-                        : "Không thể cập nhật hồ sơ.";
-                    Alert.alert("Lỗi cập nhật", message);
-                  } finally {
-                    setSubmitting(false);
-                  }
+          {/* Avatar + info card */}
+          <View
+            className="rounded-3xl bg-card px-5 py-5 flex-row items-center gap-4"
+            style={{
+              shadowColor: "#0f172a",
+              shadowOffset: { width: 0, height: 6 },
+              shadowOpacity: 0.08,
+              shadowRadius: 16,
+              elevation: 3,
+            }}
+          >
+            <TouchableOpacity
+              onPress={handlePickAvatar}
+              activeOpacity={0.85}
+              disabled={avatarBusy}
+              className="relative"
+            >
+              <View
+                className="w-20 h-20 rounded-full bg-secondary items-center justify-center overflow-hidden"
+                style={{
+                  borderWidth: 3,
+                  borderColor: "#ffffff",
+                  shadowColor: "#1a5fd4",
+                  shadowOffset: { width: 0, height: 4 },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 10,
+                  elevation: 4,
                 }}
-                className="rounded-xl bg-primary py-3 items-center"
               >
-                {submitting ? (
-                  <ActivityIndicator color="#ffffff" />
+                {avatarUrl ? (
+                  <Image
+                    key={`${avatarUrl}-${avatarVersion}`}
+                    source={{ uri: avatarUrl }}
+                    className="w-full h-full"
+                    resizeMode="cover"
+                  />
                 ) : (
-                  <Text className="text-white font-semibold">Lưu thay đổi</Text>
+                  <CircleUserRound
+                    size={42}
+                    color="#1a5fd4"
+                    strokeWidth={1.8}
+                  />
                 )}
+              </View>
+              <View
+                className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-primary items-center justify-center"
+                style={{
+                  borderWidth: 2,
+                  borderColor: "#ffffff",
+                }}
+              >
+                {avatarBusy ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Pencil size={12} color="#ffffff" strokeWidth={2.6} />
+                )}
+              </View>
+            </TouchableOpacity>
+
+            <View className="flex-1">
+              <Text className="text-lg font-bold text-foreground" numberOfLines={1}>
+                {compactName(displayName)}
+              </Text>
+              {displayEmail ? (
+                <Text
+                  className="text-xs text-muted-foreground mt-1"
+                  numberOfLines={1}
+                >
+                  {displayEmail}
+                </Text>
+              ) : null}
+              {displayPhone ? (
+                <View className="flex-row items-center gap-1 mt-1">
+                  <Phone size={11} color="#7a8599" strokeWidth={2.2} />
+                  <Text className="text-xs text-muted-foreground">
+                    {displayPhone}
+                  </Text>
+                </View>
+              ) : null}
+              <TouchableOpacity
+                onPress={() => router.push("/edit-profile")}
+                className="mt-2 self-start rounded-full bg-secondary px-3 py-1"
+              >
+                <Text className="text-[11px] font-semibold text-primary">
+                  Cập nhật hồ sơ
+                </Text>
               </TouchableOpacity>
             </View>
-          ) : (
-            <View className="mt-4 gap-3">
-              <View>
-                <Text className="text-xs text-muted-foreground">Số điện thoại</Text>
-                <Text className="text-base font-medium text-foreground">
-                  {profile?.phone ?? authUser?.phone ?? "Chưa cập nhật"}
-                </Text>
+          </View>
+        </View>
+
+        {/* Stats */}
+        <View className="px-4">
+          <View className="flex-row gap-3">
+            <View className="flex-1 rounded-2xl bg-card p-4 items-start">
+              <View className="w-9 h-9 rounded-lg bg-secondary items-center justify-center mb-2">
+                <History size={18} color="#1a5fd4" strokeWidth={2.2} />
               </View>
-              <View>
-                <Text className="text-xs text-muted-foreground">Email</Text>
-                <Text className="text-base font-medium text-foreground">
-                  {profile?.email ?? authUser?.email ?? "Chưa cập nhật"}
+              <Text className="text-2xl font-bold text-foreground">
+                {bookings.length}
+              </Text>
+              <Text className="text-[11px] text-muted-foreground mt-0.5">
+                Booking gần đây
+              </Text>
+            </View>
+            <View className="flex-1 rounded-2xl bg-card p-4 items-start">
+              <View className="w-9 h-9 rounded-lg bg-secondary items-center justify-center mb-2">
+                <CarFront size={18} color="#1a5fd4" strokeWidth={2.2} />
+              </View>
+              <Text className="text-2xl font-bold text-foreground">
+                {histories.length}
+              </Text>
+              <Text className="text-[11px] text-muted-foreground mt-0.5">
+                Lần rửa xe
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Menu sections */}
+        <View className="px-4 mt-5 gap-5">
+          {sections.map((section, sectionIndex) => (
+            <View key={sectionIndex}>
+              {section.title ? (
+                <Text className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 ml-2">
+                  {section.title}
                 </Text>
+              ) : null}
+              <View
+                className="rounded-2xl bg-card overflow-hidden"
+                style={{
+                  shadowColor: "#0f172a",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.05,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                {section.items.map((item, itemIndex) => {
+                  const Icon = item.icon;
+                  return (
+                    <TouchableOpacity
+                      key={`${sectionIndex}-${itemIndex}`}
+                      onPress={item.onPress}
+                      activeOpacity={0.7}
+                      className={`flex-row items-center gap-3 px-4 py-3.5 ${
+                        itemIndex < section.items.length - 1
+                          ? "border-b border-border"
+                          : ""
+                      }`}
+                    >
+                      <View
+                        className={`w-10 h-10 rounded-xl items-center justify-center ${
+                          item.destructive ? "bg-red-50" : "bg-secondary"
+                        }`}
+                      >
+                        <Icon
+                          size={18}
+                          color={item.destructive ? "#ef4444" : "#1a5fd4"}
+                          strokeWidth={2.2}
+                        />
+                      </View>
+                      <View className="flex-1">
+                        <Text
+                          className={`text-sm font-medium ${
+                            item.destructive
+                              ? "text-red-500"
+                              : "text-foreground"
+                          }`}
+                        >
+                          {item.label}
+                        </Text>
+                        {item.value ? (
+                          <Text className="text-[11px] text-muted-foreground mt-0.5">
+                            {item.value}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <ChevronRight
+                        size={18}
+                        color={item.destructive ? "#ef4444" : "#94a3b8"}
+                        strokeWidth={2.2}
+                      />
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             </View>
-          )}
-        </View>
+          ))}
 
-        <View className="px-4 mt-4 flex-row gap-3">
-          <View className="flex-1 rounded-xl bg-card p-4">
-            <Text className="text-xs text-muted-foreground">Booking gần đây</Text>
-            <Text className="text-3xl font-bold text-primary mt-2">
-              {bookings.length}
-            </Text>
-          </View>
-          <View className="flex-1 rounded-xl bg-card p-4">
-            <Text className="text-xs text-muted-foreground">Chưa đọc</Text>
-            <Text className="text-3xl font-bold text-primary mt-2">
-              {notifications.filter((item) => item.in_app_status !== "READ").length}
-            </Text>
-          </View>
-        </View>
-
-        <View className="mx-4 mt-4 rounded-2xl bg-card p-5">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-lg font-bold text-foreground">Lịch hẹn của tôi</Text>
-            <TouchableOpacity onPress={() => router.push("/(tabs)/booking")}>
-              <Text className="text-sm font-medium text-primary">Đặt thêm</Text>
-            </TouchableOpacity>
-          </View>
-          <View className="mt-4 gap-3">
-            {bookings.length === 0 ? (
-              <Text className="text-sm text-muted-foreground">
-                Bạn chưa có booking nào.
-              </Text>
-            ) : (
-              bookings.map((booking) => (
-                <View key={booking.id} className="rounded-xl border border-border p-4">
-                  <Text className="font-semibold text-foreground">
-                    {booking.service_package?.name ?? booking.service_package_id}
-                  </Text>
-                  <Text className="text-sm text-muted-foreground mt-1">
-                    {booking.garage?.name ?? booking.garage_id}
-                  </Text>
-                  <Text className="text-sm text-muted-foreground mt-1">
-                    {formatDateTime(booking.start_time)}
-                  </Text>
-                  <View className="flex-row items-center justify-between mt-3">
-                    <Text className="text-primary font-semibold">
-                      {booking.status}
-                    </Text>
-                    {(booking.status === "PENDING" || booking.status === "CONFIRMED") && (
-                      <TouchableOpacity
-                        onPress={async () => {
-                          try {
-                            await api.cancelBooking(accessToken!, booking.id, "Hủy từ app customer");
-                            await loadData();
-                          } catch (error) {
-                            const message =
-                              error instanceof ApiError
-                                ? error.message
-                                : "Không thể hủy booking.";
-                            Alert.alert("Lỗi hủy booking", message);
-                          }
-                        }}
-                      >
-                        <Text className="text-sm text-red-500 font-medium">Hủy lịch</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-
-        <View className="mx-4 mt-4 rounded-2xl bg-card p-5">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-lg font-bold text-foreground">Lịch sử rửa xe</Text>
-            <History size={18} color="#1a5fd4" strokeWidth={2.2} />
-          </View>
-          <View className="mt-4 gap-3">
-            {histories.length === 0 ? (
-              <Text className="text-sm text-muted-foreground">
-                Chưa có wash history nào.
-              </Text>
-            ) : (
-              histories.map((history) => (
-                <View key={history.id} className="rounded-xl border border-border p-4">
-                  <Text className="font-semibold text-foreground">
-                    {history.service_package?.name ?? "Dịch vụ đã hoàn tất"}
-                  </Text>
-                  <Text className="text-sm text-muted-foreground mt-1">
-                    {history.garage?.name ?? "Garage"}
-                  </Text>
-                  <Text className="text-sm text-primary mt-2 font-semibold">
-                    {formatCurrency(history.amount_paid)}
-                  </Text>
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-
-        <View className="px-4 mt-4 gap-3">
+          {/* Logout */}
           <TouchableOpacity
-            onPress={() => router.push("/my-vehicles")}
-            className="rounded-xl bg-card px-4 py-4 flex-row items-center gap-3"
-          >
-            <CarFront size={20} color="#1a5fd4" strokeWidth={2.2} />
-            <Text className="font-medium text-foreground">Quản lý phương tiện</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={async () => {
-              await logout();
-              router.replace("/(tabs)");
+            onPress={() => {
+              Alert.alert("Đăng xuất", "Bạn có chắc muốn đăng xuất?", [
+                { text: "Hủy", style: "cancel" },
+                {
+                  text: "Đăng xuất",
+                  style: "destructive",
+                  onPress: async () => {
+                    await logout();
+                    router.replace("/(tabs)");
+                  },
+                },
+              ]);
             }}
-            className="rounded-xl bg-card px-4 py-4 flex-row items-center gap-3"
+            activeOpacity={0.85}
+            className="rounded-2xl bg-card p-4 flex-row items-center gap-3"
           >
-            <LogOut size={20} color="#ef4444" strokeWidth={2.2} />
-            <Text className="font-medium text-red-500">Đăng xuất</Text>
+            <View className="w-10 h-10 rounded-xl bg-red-50 items-center justify-center">
+              <LogOut size={18} color="#ef4444" strokeWidth={2.2} />
+            </View>
+            <Text className="flex-1 text-sm font-semibold text-red-500">
+              Đăng xuất
+            </Text>
+            <ChevronRight size={18} color="#ef4444" strokeWidth={2.2} />
           </TouchableOpacity>
+
+          {/* Recent bookings preview */}
+          {bookings.length > 0 ? (
+            <View>
+              <View className="flex-row items-center justify-between mb-2 ml-2">
+                <Text className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+                  Lịch hẹn gần đây
+                </Text>
+                <TouchableOpacity onPress={() => router.push("/(tabs)/booking")}>
+                  <Text className="text-[11px] font-semibold text-primary">
+                    Đặt thêm
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              <View
+                className="rounded-2xl bg-card overflow-hidden"
+                style={{
+                  shadowColor: "#0f172a",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.05,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                {bookings.slice(0, 3).map((booking, index) => (
+                  <View
+                    key={booking.id}
+                    className={`flex-row items-center gap-3 px-4 py-3 ${
+                      index < Math.min(bookings.length, 3) - 1
+                        ? "border-b border-border"
+                        : ""
+                    }`}
+                  >
+                    <View className="w-10 h-10 rounded-xl bg-secondary items-center justify-center">
+                      <CarFront size={18} color="#1a5fd4" strokeWidth={2.2} />
+                    </View>
+                    <View className="flex-1">
+                      <Text
+                        className="text-sm font-semibold text-foreground"
+                        numberOfLines={1}
+                      >
+                        {booking.service_package?.name ??
+                          booking.service_package_id}
+                      </Text>
+                      <Text
+                        className="text-[11px] text-muted-foreground mt-0.5"
+                        numberOfLines={1}
+                      >
+                        {booking.garage?.name ?? booking.garage_id} •{" "}
+                        {formatDateTime(booking.start_time)}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        backgroundColor:
+                          booking.status === "COMPLETED"
+                            ? "#dcfce7"
+                            : booking.status === "CANCELED"
+                            ? "#fee2e2"
+                            : "#dbe7fb",
+                      }}
+                      className="px-2.5 py-1 rounded-full"
+                    >
+                      <Text
+                        style={{
+                          color:
+                            booking.status === "COMPLETED"
+                              ? "#15803d"
+                              : booking.status === "CANCELED"
+                              ? "#b91c1c"
+                              : "#1a5fd4",
+                        }}
+                        className="text-[10px] font-bold"
+                      >
+                        {booking.status}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Recent wash history */}
+          {histories.length > 0 ? (
+            <View>
+              <Text className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 ml-2">
+                Lịch sử rửa xe
+              </Text>
+              <View
+                className="rounded-2xl bg-card overflow-hidden"
+                style={{
+                  shadowColor: "#0f172a",
+                  shadowOffset: { width: 0, height: 2 },
+                  shadowOpacity: 0.05,
+                  shadowRadius: 8,
+                  elevation: 2,
+                }}
+              >
+                {histories.slice(0, 3).map((history, index) => (
+                  <View
+                    key={history.id}
+                    className={`flex-row items-center gap-3 px-4 py-3 ${
+                      index < Math.min(histories.length, 3) - 1
+                        ? "border-b border-border"
+                        : ""
+                    }`}
+                  >
+                    <View className="w-10 h-10 rounded-xl bg-secondary items-center justify-center">
+                      <History size={18} color="#1a5fd4" strokeWidth={2.2} />
+                    </View>
+                    <View className="flex-1">
+                      <Text
+                        className="text-sm font-semibold text-foreground"
+                        numberOfLines={1}
+                      >
+                        {history.service_package?.name ?? "Dịch vụ đã hoàn tất"}
+                      </Text>
+                      <Text className="text-[11px] text-muted-foreground mt-0.5">
+                        {history.garage?.name ?? "Garage"} •{" "}
+                        {formatCurrency(history.amount_paid)}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
     </SafeAreaView>
