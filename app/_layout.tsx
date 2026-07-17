@@ -15,6 +15,7 @@ export default function RootLayout() {
         <Stack.Screen name="vehicle-form" />
         <Stack.Screen name="settings" />
         <Stack.Screen name="edit-profile" />
+        <Stack.Screen name="booking-detail" />
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="forgot-password" />

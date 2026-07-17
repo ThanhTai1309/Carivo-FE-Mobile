@@ -15,6 +15,7 @@ import * as ImagePicker from "expo-image-picker";
 import {
   Bell,
   CarFront,
+  CalendarClock,
   ChevronRight,
   CircleHelp,
   CircleUserRound,
@@ -217,6 +218,12 @@ export default function ProfileScreen() {
     {
       title: "Hoạt động",
       items: [
+        {
+          icon: CalendarClock,
+          label: "Lịch sử đặt lịch",
+          value: `${bookings.length}`,
+          onPress: () => router.push("/(tabs)/booking-history"),
+        },
         {
           icon: Bell,
           label: "Thông báo",

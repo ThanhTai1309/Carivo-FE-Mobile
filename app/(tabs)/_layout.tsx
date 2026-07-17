@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Home, Star, CalendarDays, User } from "lucide-react-native";
+import { Home, Star, CalendarDays, History, User } from "lucide-react-native";
 import { View } from "react-native";
 
 const COLORS = {
@@ -70,6 +70,15 @@ export default function TabsLayout() {
           title: "Đặt lịch",
           tabBarIcon: ({ focused }) => (
             <TabIcon icon={CalendarDays} focused={focused} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="booking-history"
+        options={{
+          title: "Lịch sử",
+          tabBarIcon: ({ focused }) => (
+            <TabIcon icon={History} focused={focused} />
           ),
         }}
       />
