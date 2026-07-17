@@ -1,15 +1,16 @@
-import { useEffect, useState } from "react";
-import { Alert, RefreshControl, ScrollView } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import HomeHeader from "@/components/HomeHeader";
 import PromoBanner from "@/components/PromoBanner";
 import MyCarSection from "@/components/MyCarSection";
 import FeaturedServices from "@/components/FeaturedServices";
 import StatsRow from "@/components/StatsRow";
+import SectionHeader from "@/components/home/SectionHeader";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
-import { compactName, formatLicensePlate, minutesUntil, toDateInputValue } from "@/lib/format";
+import { compactName, minutesUntil, toDateInputValue } from "@/lib/format";
 import type { Garage, Promotion, ServicePackage, Vehicle } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
@@ -88,6 +89,13 @@ export default function HomeScreen() {
     void loadHome();
   }, [accessToken, isAuthenticated]);
 
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      void loadHome();
+    }, [accessToken, isAuthenticated])
+  );
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-background">
@@ -118,7 +126,7 @@ export default function HomeScreen() {
 
   const primaryPromotion = promotions[0];
   const userName = compactName(profile?.full_name ?? authUser?.full_name, "Khách");
-  const primaryCars = vehicles.slice(0, 1).map((vehicle) => ({
+  const primaryCars = vehicles.slice(0, 10).map((vehicle) => ({
     name: `${vehicle.brand ?? ""} ${vehicle.model ?? ""}`.trim() || vehicle.vehicle_type,
     plate: vehicle.raw_license_plate,
   }));
@@ -128,7 +136,7 @@ export default function HomeScreen() {
       <ScrollView
         className="flex-1"
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: 100 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -148,7 +156,7 @@ export default function HomeScreen() {
         />
 
         <PromoBanner
-          badge={primaryPromotion ? primaryPromotion.code : "GUEST MODE"}
+          badge={primaryPromotion ? primaryPromotion.code : "ƯU ĐÃI ĐỘC QUYỀN"}
           title={
             primaryPromotion
               ? primaryPromotion.name
@@ -183,6 +191,10 @@ export default function HomeScreen() {
             })
           }
         />
+
+        <View className="px-4 mt-5">
+          <SectionHeader title="Hoạt động của bạn" />
+        </View>
 
         <StatsRow
           waitMinutes={waitMinutes}

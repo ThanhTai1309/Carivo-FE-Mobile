@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -8,8 +8,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { Bell, Info, Plus, User } from "lucide-react-native";
-import { useRouter } from "expo-router";
+import { ArrowLeft, Bell, Info, Plus, User } from "lucide-react-native";
+import { useFocusEffect, useRouter } from "expo-router";
 import ScreenState from "@/components/common/ScreenState";
 import VehicleCard from "@/components/vehicles/VehicleCard";
 import { api, ApiError } from "@/lib/api";
@@ -52,6 +52,12 @@ export default function MyVehiclesScreen() {
   useEffect(() => {
     void loadVehicles();
   }, [accessToken]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadVehicles();
+    }, [accessToken])
+  );
 
   const handleDelete = (id: string, name: string) => {
     Alert.alert("Xóa xe", `Bạn có chắc muốn xóa "${name}"?`, [
@@ -105,16 +111,23 @@ export default function MyVehiclesScreen() {
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       {/* Header */}
-      <View className="flex-row items-center justify-between px-4 pt-5 pb-3">
-        <View className="flex-row items-center gap-2">
+      <View className="flex-row items-center justify-between px-4 pt-4 pb-3 border-b border-border">
+        <View className="flex-row items-center gap-3">
+          <TouchableOpacity
+            onPress={() => router.back()}
+            className="w-9 h-9 items-center justify-center"
+          >
+            <ArrowLeft size={22} color="#0d0d0d" strokeWidth={2.4} />
+          </TouchableOpacity>
           <View className="w-9 h-9 rounded-full bg-secondary items-center justify-center">
             <User size={18} color="#1a5fd4" strokeWidth={2.7} />
           </View>
-          <Text className="text-primary font-semibold text-base">
-            Xe của tôi
-          </Text>
+          <Text className="text-primary font-bold text-base">Xe của tôi</Text>
         </View>
-        <TouchableOpacity className="w-9 h-9 items-center justify-center">
+        <TouchableOpacity
+          onPress={() => router.push("/notifications")}
+          className="w-9 h-9 items-center justify-center"
+        >
           <Bell size={20} color="#0d0d0d" strokeWidth={2.4} />
         </TouchableOpacity>
       </View>
@@ -134,7 +147,7 @@ export default function MyVehiclesScreen() {
         }
       >
         {/* Page title */}
-        <View className="px-4 pt-3 pb-5">
+        <View className="px-4 pt-4 pb-5">
           <Text className="text-3xl font-black text-foreground mb-2">
             Quản lý phương tiện
           </Text>
@@ -180,7 +193,12 @@ export default function MyVehiclesScreen() {
                     plateTop={plateTop}
                     plateBottom={plateBottom}
                     selected={vehicle.id === selectedId}
-                    onEdit={() => {/* navigate to edit screen */}}
+                    onEdit={() =>
+                      router.push({
+                        pathname: "/vehicle-form",
+                        params: { id: vehicle.id },
+                      })
+                    }
                     onDelete={() =>
                       handleDelete(
                         vehicle.id,
@@ -200,6 +218,7 @@ export default function MyVehiclesScreen() {
             className="rounded-xl border-2 border-border flex-col items-center py-8 gap-2"
             style={{ borderStyle: "dashed" }}
             activeOpacity={0.7}
+            onPress={() => router.push("/vehicle-form")}
           >
             <View className="w-14 h-14 rounded-full bg-primary items-center justify-center mb-1">
               <Plus size={28} color="#ffffff" strokeWidth={1.72} />
