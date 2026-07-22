@@ -1,7 +1,5 @@
-import { View, Text, TouchableOpacity, ImageBackground, StyleSheet } from "react-native";
-
-const BANNER_IMAGE =
-  "https://firebasestorage.googleapis.com/v0/b/banani-prod.appspot.com/o/reference-images%2Fe0b24ab0-59c1-4473-8dc4-849ab62eab82?alt=media&token=e7745cd9-7b6a-41c2-b0fa-b84355d444a7";
+import { LinearGradient } from "expo-linear-gradient";
+import { View, Text, TouchableOpacity } from "react-native";
 
 interface PromoBannerProps {
   badge?: string;
@@ -15,34 +13,37 @@ export default function PromoBanner({
   badge = "ƯU ĐÃI ĐỘC QUYỀN",
   title = "Giảm 50% cho lần rửa đầu tiên",
   subtitle,
-  ctaText = "Nhận ngay",
+  ctaText = "Nhan ngay",
   onPress,
 }: PromoBannerProps) {
   return (
-    <View className="mx-4 rounded-xl overflow-hidden" style={{ height: 180 }}>
-      <ImageBackground
-        source={{ uri: BANNER_IMAGE }}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
+    <View className="mx-4 rounded-xl overflow-hidden" style={{ height: 140 }}>
+      <LinearGradient
+        colors={["#1a5fd4", "#0d3fa8"]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ flex: 1 }}
       />
-      <View style={styles.overlay} />
-      <View className="flex-1 p-4 justify-between">
+      <View className="absolute inset-0 p-4 justify-between">
         <View>
-          <View className="bg-primary rounded-sm px-2 py-1 self-start mb-2">
+          <View className="bg-white/20 rounded-sm px-2 py-1 self-start mb-2">
             <Text className="text-white text-xs font-semibold">{badge}</Text>
           </View>
-          <Text className="text-white font-bold text-2xl leading-tight">
+          <Text
+            className="text-white font-bold text-xl leading-tight"
+            numberOfLines={2}
+          >
             {title}
           </Text>
           {subtitle ? (
-            <Text className="text-white/80 text-sm mt-2 leading-5">
+            <Text className="text-white/80 text-sm mt-1 leading-5" numberOfLines={2}>
               {subtitle}
             </Text>
           ) : null}
         </View>
         <TouchableOpacity
           onPress={onPress}
-          className="bg-card rounded-lg px-5 py-2 self-start mt-2"
+          className="bg-white rounded-lg px-4 py-2 self-start"
         >
           <Text className="text-primary font-semibold text-sm">{ctaText}</Text>
         </TouchableOpacity>
@@ -50,14 +51,3 @@ export default function PromoBanner({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(20,70,180,0.80)",
-  },
-});

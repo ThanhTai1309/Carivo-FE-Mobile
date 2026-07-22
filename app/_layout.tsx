@@ -12,6 +12,10 @@ export default function RootLayout() {
         <Stack.Screen name="payment" />
         <Stack.Screen name="payment-success" />
         <Stack.Screen name="my-vehicles" />
+        <Stack.Screen name="vehicle-form" />
+        <Stack.Screen name="settings" />
+        <Stack.Screen name="edit-profile" />
+        <Stack.Screen name="booking-detail" />
         <Stack.Screen name="login" />
         <Stack.Screen name="register" />
         <Stack.Screen name="forgot-password" />

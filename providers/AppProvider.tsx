@@ -1,4 +1,12 @@
-import { createContext, useContext, useMemo, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { api } from "@/lib/api";
 import type {
   PhoneVerificationChallenge,
@@ -14,12 +22,18 @@ interface RegisterPayload {
   phone_verification_token: string;
 }
 
+export interface UploadedFile {
+  id: string;
+  url: string;
+}
+
 interface AppContextValue {
   accessToken: string | null;
   authUser: UserPublic | null;
   profile: UserPublic | null;
   authBusy: boolean;
   isAuthenticated: boolean;
+  isHydrated: boolean;
   login: (phone: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -43,7 +57,15 @@ interface AppContextValue {
     current_password?: string;
     phone_verification_token?: string;
   }) => Promise<void>;
+  changePassword: (
+    currentPassword: string,
+    newPassword: string
+  ) => Promise<void>;
+  uploadImage: (uri: string, mimeType?: string) => Promise<UploadedFile>;
 }
+
+const TOKEN_STORAGE_KEY = "@carivo/access-token";
+const USER_STORAGE_KEY = "@carivo/auth-user";
 
 const AppContext = createContext<AppContextValue | null>(null);
 
@@ -52,8 +74,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<UserPublic | null>(null);
   const [profile, setProfile] = useState<UserPublic | null>(null);
   const [authBusy, setAuthBusy] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
 
-  const refreshProfile = async () => {
+  // Restore session on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const [[, storedToken], [, storedUser]] = await AsyncStorage.multiGet([
+          TOKEN_STORAGE_KEY,
+          USER_STORAGE_KEY,
+        ]);
+
+        if (cancelled) return;
+
+        if (storedToken) {
+          setAccessToken(storedToken);
+          if (storedUser) {
+            try {
+              setAuthUser(JSON.parse(storedUser) as UserPublic);
+            } catch {
+              // ignore corrupted JSON
+            }
+          }
+          // Validate token by fetching fresh profile in the background
+          try {
+            const response = await api.getProfile(storedToken);
+            if (!cancelled) {
+              setProfile(response.data);
+              if (response.data) setAuthUser(response.data);
+            }
+          } catch {
+            // Token invalid / expired — clear storage silently
+            if (!cancelled) {
+              await AsyncStorage.multiRemove([TOKEN_STORAGE_KEY, USER_STORAGE_KEY]);
+              setAccessToken(null);
+              setAuthUser(null);
+              setProfile(null);
+            }
+          }
+        }
+      } finally {
+        if (!cancelled) setIsHydrated(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const refreshProfile = useCallback(async () => {
     if (!accessToken) {
       setProfile(null);
       return;
@@ -61,16 +133,34 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     const response = await api.getProfile(accessToken);
     setProfile(response.data);
-  };
+    setAuthUser(response.data);
+  }, [accessToken]);
 
   const login = async (phone: string, password: string) => {
     setAuthBusy(true);
     try {
       const response = await api.login(phone, password);
-      setAccessToken(response.data.access_token);
-      setAuthUser(response.data.user);
-      const profileResponse = await api.getProfile(response.data.access_token);
-      setProfile(profileResponse.data);
+      const token = response.data.access_token;
+      const user = response.data.user;
+      setAccessToken(token);
+      setAuthUser(user);
+      await AsyncStorage.multiSet([
+        [TOKEN_STORAGE_KEY, token],
+        [USER_STORAGE_KEY, JSON.stringify(user)],
+      ]);
+      try {
+        const profileResponse = await api.getProfile(token);
+        setProfile(profileResponse.data);
+        if (profileResponse.data) {
+          setAuthUser(profileResponse.data);
+          await AsyncStorage.setItem(
+            USER_STORAGE_KEY,
+            JSON.stringify(profileResponse.data)
+          );
+        }
+      } catch {
+        // profile fetch failure should not block login
+      }
     } finally {
       setAuthBusy(false);
     }
@@ -87,6 +177,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         }
       }
     } finally {
+      await AsyncStorage.multiRemove([TOKEN_STORAGE_KEY, USER_STORAGE_KEY]);
       setAccessToken(null);
       setAuthUser(null);
       setProfile(null);
@@ -141,6 +232,37 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const response = await api.updateProfile(accessToken, payload);
     setProfile(response.data);
     setAuthUser((current) => ({ ...(current ?? {}), ...response.data }));
+    await AsyncStorage.setItem(
+      USER_STORAGE_KEY,
+      JSON.stringify({ ...(authUser ?? {}), ...response.data })
+    );
+  };
+
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string
+  ) => {
+    if (!accessToken) {
+      throw new Error("Dang nhap de tiep tuc");
+    }
+    await api.changePassword(accessToken, currentPassword, newPassword);
+  };
+
+  const uploadImage = async (uri: string, mimeType?: string) => {
+    if (!accessToken) {
+      throw new Error("Dang nhap de tiep tuc");
+    }
+
+    const formData = new FormData();
+    const fileName = uri.split("/").pop() ?? `avatar-${Date.now()}.jpg`;
+    formData.append("file", {
+      uri,
+      name: fileName,
+      type: mimeType ?? "image/jpeg",
+    } as unknown as Blob);
+
+    const response = await api.uploadFile(accessToken, formData);
+    return response.data;
   };
 
   const value = useMemo<AppContextValue>(
@@ -150,6 +272,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       profile,
       authBusy,
       isAuthenticated: Boolean(accessToken),
+      isHydrated,
       login,
       logout,
       refreshProfile,
@@ -159,8 +282,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       forgotPassword,
       resetPassword,
       updateProfile,
+      changePassword,
+      uploadImage,
     }),
-    [accessToken, authBusy, authUser, profile]
+    [accessToken, authBusy, authUser, profile, isHydrated, refreshProfile]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

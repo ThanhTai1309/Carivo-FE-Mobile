@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,10 +15,14 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import BookingInfoCard from "@/components/payment/BookingInfoCard";
 import PaymentMethodList from "@/components/payment/PaymentMethodList";
 import PriceSummary from "@/components/payment/PriceSummary";
+import VoucherSection, {
+  type AppliedPromotion,
+} from "@/components/payment/VoucherSection";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
+import type { QueryValue } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
-import type { Promotion } from "@/lib/types";
+import type { Promotion, Vehicle, VehicleType } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
 const AVATAR =
@@ -36,85 +40,148 @@ export default function PaymentScreen() {
     vehiclePlate?: string;
     startTime?: string;
     price?: string;
+    addOnIds?: string;
   }>();
   const { accessToken, isAuthenticated } = useApp();
   const [selectedPayment, setSelectedPayment] = useState("card");
-  const [promoCode, setPromoCode] = useState("");
   const [usedPoints, setUsedPoints] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
+  const [appliedPromo, setAppliedPromo] = useState<AppliedPromotion | null>(
+    null
+  );
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [pointsDiscount, setPointsDiscount] = useState(0);
   const [currentPoints, setCurrentPoints] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [vehicle, setVehicle] = useState<Vehicle | null>(null);
 
   const basePrice = Number(params.price ?? 0);
   const total = Math.max(0, basePrice - promoDiscount - pointsDiscount);
 
   useEffect(() => {
     const loadData = async () => {
-      if (!isAuthenticated || !accessToken) {
-        setLoading(false);
-        return;
-      }
-
+      setLoading(true);
       try {
-        const [promotionsResponse, loyaltyResponse] = await Promise.all([
-          api.getPromotions({ limit: 10 }),
-          api.getLoyaltySummary(accessToken),
-        ]);
+        const query: Record<string, QueryValue> = {
+          limit: 50,
+        };
+        const promotionsResponse = await api.getPromotions(query);
         setPromotions(promotionsResponse.data ?? []);
-        setCurrentPoints(loyaltyResponse.data.loyalty?.available_points ?? 0);
       } catch (error) {
         const message =
-          error instanceof ApiError ? error.message : "Không thể tải ưu đãi.";
+          error instanceof ApiError
+            ? error.message
+            : "Không thể tải khuyến mãi.";
         Alert.alert("Lỗi dữ liệu", message);
-      } finally {
-        setLoading(false);
       }
+
+      if (isAuthenticated && accessToken) {
+        try {
+          const loyaltyResponse = await api.getLoyaltySummary(accessToken);
+          setCurrentPoints(
+            loyaltyResponse.data.loyalty?.available_points ?? 0
+          );
+        } catch (error) {
+          const message =
+            error instanceof ApiError
+              ? error.message
+              : "Không thể tải điểm thưởng.";
+          Alert.alert("Lỗi dữ liệu", message);
+        }
+      }
+
+      setLoading(false);
     };
 
     void loadData();
   }, [accessToken, isAuthenticated]);
 
+  useEffect(() => {
+    const loadVehicle = async () => {
+      if (!accessToken || !params.vehicleId) {
+        setVehicle(null);
+        return;
+      }
+      try {
+        const response = await api.getVehicle(accessToken, params.vehicleId);
+        setVehicle(response.data ?? null);
+      } catch {
+        setVehicle(null);
+      }
+    };
+    void loadVehicle();
+  }, [accessToken, params.vehicleId]);
+
+  useEffect(() => {
+    setPromoDiscount(0);
+    setAppliedPromo(null);
+  }, [params.servicePackageId]);
+
+  const handleAppliedChange = useCallback(
+    (next: AppliedPromotion | null) => {
+      setAppliedPromo(next);
+      setPromoDiscount(next?.discountAmount ?? 0);
+    },
+    []
+  );
+
+  const handleValidatePromo = useCallback(
+    async (
+      promotionCode: string
+    ): Promise<AppliedPromotion | { error: string }> => {
+      if (!accessToken || !params.servicePackageId) {
+        return { error: "Thiếu thông tin để áp dụng mã." };
+      }
+      try {
+        const response = await api.validatePromotion(
+          accessToken,
+          promotionCode,
+          params.servicePackageId
+        );
+        const promo = response.data.promotion;
+        const discount = response.data.discount_amount ?? 0;
+        if (!promo) {
+          return { error: "Mã không hợp lệ." };
+        }
+        return {
+          promotion: promo,
+          discountAmount: discount,
+          finalPrice: response.data.final_price ?? basePrice,
+        };
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : "Mã không hợp lệ hoặc đã hết hạn.";
+        return { error: message };
+      }
+    },
+    [accessToken, params.servicePackageId, basePrice]
+  );
+
   const priceRows = useMemo(
     () => [
       { label: "Tạm tính", value: formatCurrency(basePrice) },
       {
-        label: "Khuyến mãi",
-        value: promoDiscount ? `- ${formatCurrency(promoDiscount)}` : formatCurrency(0),
+        label: appliedPromo
+          ? `Khuyến mãi (${appliedPromo.promotion.code})`
+          : "Khuyến mãi",
+        value: promoDiscount
+          ? `- ${formatCurrency(promoDiscount)}`
+          : formatCurrency(0),
         danger: promoDiscount > 0,
       },
       {
         label: "Điểm thưởng",
-        value: pointsDiscount ? `- ${formatCurrency(pointsDiscount)}` : formatCurrency(0),
+        value: pointsDiscount
+          ? `- ${formatCurrency(pointsDiscount)}`
+          : formatCurrency(0),
         danger: pointsDiscount > 0,
       },
     ],
-    [basePrice, pointsDiscount, promoDiscount]
+    [basePrice, pointsDiscount, promoDiscount, appliedPromo]
   );
-
-  const handleApplyPromo = async () => {
-    if (!accessToken || !params.servicePackageId || !promoCode) {
-      Alert.alert("Thiếu mã", "Vui lòng nhập mã khuyến mãi hợp lệ.");
-      return;
-    }
-
-    try {
-      const response = await api.validatePromotion(
-        accessToken,
-        promoCode,
-        params.servicePackageId
-      );
-      setPromoDiscount(response.data.discount_amount ?? 0);
-      Alert.alert("Áp mã thành công", `Bạn được giảm ${formatCurrency(response.data.discount_amount ?? 0)}.`);
-    } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : "Không thể áp mã.";
-      Alert.alert("Mã không hợp lệ", message);
-      setPromoDiscount(0);
-    }
-  };
 
   const handleApplyPoints = async () => {
     if (!accessToken || !params.servicePackageId) {
@@ -130,7 +197,7 @@ export default function PaymentScreen() {
     try {
       const response = await api.redeemPreview(accessToken, {
         service_package_id: params.servicePackageId,
-        promotion_code: promoCode || undefined,
+        promotion_code: appliedPromo?.promotion.code,
         used_points: points,
       });
       const finalPrice = response.data.final_price ?? basePrice;
@@ -161,12 +228,21 @@ export default function PaymentScreen() {
 
     setSubmitting(true);
     try {
+      const addOnIdsRaw = params.addOnIds ?? "";
+      const addOnServiceIds = addOnIdsRaw
+        ? addOnIdsRaw
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+
       const response = await api.createBooking(accessToken, {
         garage_id: params.garageId,
         vehicle_id: params.vehicleId,
         service_package_id: params.servicePackageId,
+        add_on_service_ids: addOnServiceIds,
         start_time: params.startTime,
-        promotion_code: promoCode || undefined,
+        promotion_code: appliedPromo?.promotion.code,
         used_points: Number(usedPoints || 0) || undefined,
         note:
           selectedPayment === "card"
@@ -201,6 +277,8 @@ export default function PaymentScreen() {
 
     router.replace("/(tabs)/booking");
   };
+
+  const vehicleType: VehicleType | undefined = vehicle?.vehicle_type;
 
   if (!params.servicePackageId || !params.garageId || !params.startTime) {
     return (
@@ -258,41 +336,18 @@ export default function PaymentScreen() {
           }}
         />
 
-        <View className="mx-4 mb-4 rounded-xl border border-border bg-card p-4 gap-3">
-          <Text className="text-xs font-bold text-muted-foreground tracking-wide">
-            KHUYẾN MÃI
-          </Text>
-          <View className="flex-row gap-2">
-            <TextInput
-              value={promoCode}
-              onChangeText={setPromoCode}
-              placeholder="Nhập mã khuyến mãi"
-              placeholderTextColor="#94a3b8"
-              className="flex-1 rounded-xl border border-border bg-input px-3 py-3 text-foreground"
-            />
-            <TouchableOpacity
-              onPress={handleApplyPromo}
-              className="rounded-xl bg-primary px-4 justify-center"
-            >
-              <Text className="text-white font-semibold">Áp dụng</Text>
-            </TouchableOpacity>
-          </View>
-          {promotions.length > 0 ? (
-            <View className="flex-row flex-wrap gap-2">
-              {promotions.slice(0, 3).map((promotion) => (
-                <TouchableOpacity
-                  key={promotion.id}
-                  onPress={() => setPromoCode(promotion.code)}
-                  className="rounded-full bg-secondary px-3 py-2"
-                >
-                  <Text className="text-xs font-medium text-primary">
-                    {promotion.code}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : null}
-        </View>
+        <VoucherSection
+          promotions={promotions}
+          servicePackageId={params.servicePackageId}
+          servicePrice={basePrice}
+          vehicleType={vehicleType}
+          isAuthenticated={isAuthenticated}
+          loading={loading}
+          applied={appliedPromo}
+          onAppliedChange={handleAppliedChange}
+          onError={(msg) => Alert.alert("Mã khuyến mãi", msg)}
+          onValidate={handleValidatePromo}
+        />
 
         {isAuthenticated ? (
           <View className="mx-4 mb-4 rounded-xl border border-border bg-card p-4 gap-3">

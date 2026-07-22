@@ -117,18 +117,25 @@ export interface ServicePackage {
   is_active?: boolean;
 }
 
+export type PromotionDiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
+
 export interface Promotion {
   id: string;
   code: string;
   name: string;
   description?: string | null;
-  discount_type: "PERCENTAGE" | "FIXED_AMOUNT";
+  discount_type: PromotionDiscountType;
   discount_value: number;
   max_discount_amount?: number | null;
   min_order_amount?: number;
   applicable_vehicle_types?: VehicleType[];
   applicable_service_package_ids?: string[];
-  end_at?: string;
+  start_at?: string | null;
+  end_at?: string | null;
+  is_active?: boolean;
+  usage_limit?: number | null;
+  usage_count?: number;
+  per_customer_limit?: number | null;
 }
 
 export interface LoyaltyAccount {

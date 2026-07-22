@@ -21,14 +21,17 @@ export default function HomeHeader({
     hour < 12 ? "Chào buổi sáng" : hour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
 
   return (
-    <View className="flex-row items-center justify-between px-4 pt-5 pb-3 bg-background">
+    <View className="flex-row items-center justify-between px-4 pt-4 pb-3 bg-background">
       <View className="flex-row items-center gap-3">
-        <View className="w-11 h-11 rounded-xl overflow-hidden">
-          <Image source={{ uri: resolvedAvatarUrl }} className="w-11 h-11" />
+        <View className="w-10 h-10 rounded-full overflow-hidden border-2 border-border">
+          <Image source={{ uri: resolvedAvatarUrl }} className="w-10 h-10" />
         </View>
-        <Text className="text-primary font-semibold text-lg">
-          {greeting}, {userName}
-        </Text>
+        <View>
+          <Text className="text-muted-foreground text-xs">{greeting},</Text>
+          <Text className="text-primary font-bold text-base leading-tight">
+            {userName}
+          </Text>
+        </View>
       </View>
       <TouchableOpacity
         onPress={onNotificationPress}
