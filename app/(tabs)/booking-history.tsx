@@ -163,57 +163,35 @@ export default function BookingHistoryScreen() {
   const [bookings, setBookings] = useState<EnrichedBooking[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [activeTab, setActiveTab] = useState<FilterTab>("ALL");
 
   const loadPage = useCallback(
-    async (pageToLoad: number, refresh = false) => {
+    async (_pageToLoad: number, _refresh = false) => {
       if (!accessToken) return;
 
-      if (refresh) {
-        setLoading(true);
-      } else if (pageToLoad === 1) {
-        setLoading(true);
-      } else {
-        setLoadingMore(true);
-      }
+      setLoading(true);
 
       try {
         const [bookingResponse, washResponse] = await Promise.all([
-          api.getBookings(accessToken, { page: pageToLoad, limit: 10 }),
-          pageToLoad === 1
-            ? api.getWashHistories(accessToken, { limit: 50 })
-            : Promise.resolve(null),
+          api.getBookings(accessToken, { page: 1, limit: 100 }),
+          api.getWashHistories(accessToken, { limit: 100 }),
         ]);
+
+        const washList = washResponse?.data ?? [];
 
         const list = (bookingResponse.data ?? []).map((b) => {
           const enriched: EnrichedBooking = { ...b };
-          if (pageToLoad === 1 && washResponse?.data) {
-            const match = washResponse.data.find(
-              (w) => w.booking_id === b.id
-            );
-            if (match) {
-              enriched.completedAt = match.service_completed_at;
-              enriched.paidAt = match.paid_at;
-              enriched.paymentMethod = match.payment_method;
-              enriched.amountPaid = match.amount_paid;
-            }
+          const match = washList.find((w) => w.booking_id === b.id);
+          if (match) {
+            enriched.completedAt = match.service_completed_at;
+            enriched.paidAt = match.paid_at;
+            enriched.paymentMethod = match.payment_method;
+            enriched.amountPaid = match.amount_paid;
           }
           return enriched;
         });
 
-        setBookings((prev) => {
-          if (refresh || pageToLoad === 1) return list;
-          return [...prev, ...list];
-        });
-
-        const meta = bookingResponse.meta;
-        setHasMore(
-          meta ? (meta.page ?? 1) < (meta.total_pages ?? 1) : list.length >= 10
-        );
-        setPage(pageToLoad);
+        setBookings(list);
       } catch (error) {
         const message =
           error instanceof ApiError
@@ -222,7 +200,6 @@ export default function BookingHistoryScreen() {
         Alert.alert("Lỗi", message);
       } finally {
         setLoading(false);
-        setLoadingMore(false);
         setRefreshing(false);
       }
     },
@@ -304,12 +281,6 @@ export default function BookingHistoryScreen() {
             }}
           />
         }
-        onEndReachedThreshold={0.4}
-        onEndReached={() => {
-          if (!loading && !loadingMore && hasMore && activeTab === "ALL") {
-            void loadPage(page + 1);
-          }
-        }}
         ListHeaderComponent={
           <View className="px-4 pt-5 pb-3">
             <Text className="text-2xl font-bold text-foreground">
@@ -436,16 +407,6 @@ export default function BookingHistoryScreen() {
               </TouchableOpacity>
             </View>
           )
-        }
-        ListFooterComponent={
-          loadingMore ? (
-            <View className="py-4 items-center">
-              <ActivityIndicator color="#1a5fd4" size="small" />
-              <Text className="text-[11px] text-muted-foreground mt-2">
-                Đang tải thêm...
-              </Text>
-            </View>
-          ) : null
         }
         renderItem={({ item }) => (
           <View className="px-4">
