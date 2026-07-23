@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   ScrollView,
   Text,
   TextInput,
@@ -10,13 +11,14 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, ArrowRight, CircleAlert } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, ExternalLink } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookingInfoCard from "@/components/payment/BookingInfoCard";
 import PaymentMethodList from "@/components/payment/PaymentMethodList";
 import PriceSummary from "@/components/payment/PriceSummary";
 import VoucherSection, {
   type AppliedPromotion,
+  type AppliedVoucher,
 } from "@/components/payment/VoucherSection";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
@@ -27,6 +29,8 @@ import { useApp } from "@/providers/AppProvider";
 
 const AVATAR =
   "https://storage.googleapis.com/banani-avatars/avatar/male/25-35/East Asian/0";
+
+type SelectedPayment = "payos" | "cash";
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -43,11 +47,16 @@ export default function PaymentScreen() {
     addOnIds?: string;
   }>();
   const { accessToken, isAuthenticated } = useApp();
-  const [selectedPayment, setSelectedPayment] = useState("card");
+  const [selectedPayment, setSelectedPayment] = useState<SelectedPayment>(
+    "payos"
+  );
   const [usedPoints, setUsedPoints] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [appliedPromo, setAppliedPromo] = useState<AppliedPromotion | null>(
+    null
+  );
+  const [appliedVoucher, setAppliedVoucher] = useState<AppliedVoucher | null>(
     null
   );
   const [promoDiscount, setPromoDiscount] = useState(0);
@@ -160,6 +169,22 @@ export default function PaymentScreen() {
     [accessToken, params.servicePackageId, basePrice]
   );
 
+  const handleValidateVoucher = useCallback(
+    async (
+      voucherCode: string
+    ): Promise<AppliedVoucher | { error: string }> => {
+      const trimmed = voucherCode.trim();
+      if (!trimmed) {
+        return { error: "Vui lòng nhập mã voucher." };
+      }
+      return {
+        code: trimmed.toUpperCase(),
+        discountAmount: 0,
+      };
+    },
+    []
+  );
+
   const priceRows = useMemo(
     () => [
       { label: "Tạm tính", value: formatCurrency(basePrice) },
@@ -173,6 +198,15 @@ export default function PaymentScreen() {
         danger: promoDiscount > 0,
       },
       {
+        label: appliedVoucher
+          ? `Voucher (${appliedVoucher.code})`
+          : "Voucher",
+        value: appliedVoucher?.discountAmount
+          ? `- ${formatCurrency(appliedVoucher.discountAmount)}`
+          : formatCurrency(0),
+        danger: (appliedVoucher?.discountAmount ?? 0) > 0,
+      },
+      {
         label: "Điểm thưởng",
         value: pointsDiscount
           ? `- ${formatCurrency(pointsDiscount)}`
@@ -180,7 +214,13 @@ export default function PaymentScreen() {
         danger: pointsDiscount > 0,
       },
     ],
-    [basePrice, pointsDiscount, promoDiscount, appliedPromo]
+    [
+      basePrice,
+      pointsDiscount,
+      promoDiscount,
+      appliedPromo,
+      appliedVoucher,
+    ]
   );
 
   const handleApplyPoints = async () => {
@@ -210,6 +250,48 @@ export default function PaymentScreen() {
     }
   };
 
+  const openCheckout = useCallback(
+    async (checkoutUrl: string | null | undefined, bookingId: string) => {
+      if (!checkoutUrl) {
+        Alert.alert(
+          "Không có liên kết thanh toán",
+          "Vui lòng thử lại hoặc chọn thanh toán tiền mặt tại garage."
+        );
+        return;
+      }
+      const supported = await Linking.canOpenURL(checkoutUrl);
+      if (!supported) {
+        Alert.alert(
+          "Không thể mở liên kết",
+          "Thiết bị không hỗ trợ mở liên kết thanh toán. Vui lòng thử lại."
+        );
+        return;
+      }
+      await Linking.openURL(checkoutUrl);
+      router.replace({
+        pathname: "/payment-success",
+        params: {
+          bookingId,
+          garageName: params.garageName,
+          serviceName: params.serviceName,
+          startTime: params.startTime,
+          vehiclePlate: params.vehiclePlate,
+          total: String(total),
+          paymentMethod: "PAYOS",
+          pending: "1",
+        },
+      });
+    },
+    [
+      params.garageName,
+      params.serviceName,
+      params.startTime,
+      params.vehiclePlate,
+      router,
+      total,
+    ]
+  );
+
   const handleConfirmBooking = async () => {
     if (!isAuthenticated || !accessToken) {
       router.push("/login");
@@ -236,6 +318,11 @@ export default function PaymentScreen() {
             .filter(Boolean)
         : undefined;
 
+      const noteText =
+        selectedPayment === "payos"
+          ? "Customer chọn thanh toán PayOS online."
+          : "Customer chọn thanh toán tiền mặt tại garage.";
+
       const response = await api.createBooking(accessToken, {
         garage_id: params.garageId,
         vehicle_id: params.vehicleId,
@@ -243,21 +330,56 @@ export default function PaymentScreen() {
         add_on_service_ids: addOnServiceIds,
         start_time: params.startTime,
         promotion_code: appliedPromo?.promotion.code,
+        voucher_code: appliedVoucher?.code,
         used_points: Number(usedPoints || 0) || undefined,
-        note:
-          selectedPayment === "card"
-            ? "Customer xác nhận booking từ mobile app."
-            : `Phương thức UI đã chọn: ${selectedPayment}. Thanh toán online chưa nối cho app customer.`,
+        note: noteText,
       });
+
+      const bookingId = response.data.id;
+
+      if (selectedPayment === "payos") {
+        try {
+          const paymentResponse = await api.createPayosPayment(
+            accessToken,
+            bookingId
+          );
+          const checkoutUrl = paymentResponse.data?.payment?.checkout_url;
+          await openCheckout(checkoutUrl, bookingId);
+          return;
+        } catch (payosError) {
+          const payosMessage =
+            payosError instanceof ApiError
+              ? payosError.message
+              : "Không thể khởi tạo thanh toán PayOS.";
+          Alert.alert(
+            "Booking đã tạo nhưng PayOS lỗi",
+            `${payosMessage}\n\nBạn có thể thanh toán sau từ chi tiết lịch hẹn.`,
+            [
+              { text: "Ở lại", style: "cancel" },
+              {
+                text: "Xem chi tiết",
+                onPress: () =>
+                  router.replace({
+                    pathname: "/booking-detail",
+                    params: { id: bookingId },
+                  }),
+              },
+            ]
+          );
+          return;
+        }
+      }
 
       router.replace({
         pathname: "/payment-success",
         params: {
-          bookingId: response.data.id,
+          bookingId,
           garageName: params.garageName,
           serviceName: params.serviceName,
           startTime: params.startTime,
+          vehiclePlate: params.vehiclePlate,
           total: String(response.data.final_price ?? total),
+          paymentMethod: "CASH",
         },
       });
     } catch (error) {
@@ -313,19 +435,6 @@ export default function PaymentScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 16 }}
       >
-        <View className="mx-4 mb-4 rounded-xl bg-secondary px-4 py-3 flex-row gap-3">
-          <CircleAlert size={20} color="#1a5fd4" strokeWidth={2.4} />
-          <View className="flex-1">
-            <Text className="font-semibold text-primary">
-              Thanh toán online đang tạm bỏ qua
-            </Text>
-            <Text className="text-sm text-primary/80 mt-1 leading-5">
-              Backend hiện chưa có endpoint customer riêng để khởi tạo PayOS.
-              App sẽ tạo booking trước, còn thanh toán thực tế xử lý sau.
-            </Text>
-          </View>
-        </View>
-
         <BookingInfoCard
           info={{
             serviceName: params.serviceName ?? "Dịch vụ đã chọn",
@@ -344,9 +453,12 @@ export default function PaymentScreen() {
           isAuthenticated={isAuthenticated}
           loading={loading}
           applied={appliedPromo}
+          appliedVoucher={appliedVoucher}
           onAppliedChange={handleAppliedChange}
+          onVoucherChange={setAppliedVoucher}
           onError={(msg) => Alert.alert("Mã khuyến mãi", msg)}
           onValidate={handleValidatePromo}
+          onValidateVoucher={handleValidateVoucher}
         />
 
         {isAuthenticated ? (
@@ -378,10 +490,23 @@ export default function PaymentScreen() {
 
         <PaymentMethodList
           selectedId={selectedPayment}
-          onSelect={setSelectedPayment}
+          onSelect={(id) => setSelectedPayment(id as SelectedPayment)}
         />
 
         <PriceSummary rows={priceRows} total={formatCurrency(total)} />
+
+        {selectedPayment === "payos" ? (
+          <View className="mx-4 mb-4 rounded-xl bg-secondary px-4 py-3 flex-row gap-3">
+            <ExternalLink size={18} color="#1a5fd4" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-xs text-foreground leading-5">
+                Sau khi xác nhận, hệ thống sẽ mở trang thanh toán PayOS. Bạn
+                có thể quét QR ngân hàng hoặc dùng thẻ Visa/Master/JCB. Trạng
+                thái booking sẽ tự động cập nhật khi thanh toán thành công.
+              </Text>
+            </View>
+          </View>
+        ) : null}
 
         <View className="px-4 pb-4">
           <TouchableOpacity
@@ -394,7 +519,9 @@ export default function PaymentScreen() {
             ) : (
               <>
                 <Text className="text-white text-base font-semibold">
-                  Xác nhận đặt lịch
+                  {selectedPayment === "payos"
+                    ? "Xác nhận và thanh toán PayOS"
+                    : "Xác nhận đặt lịch"}
                 </Text>
                 <ArrowRight size={18} color="#ffffff" strokeWidth={2.7} />
               </>

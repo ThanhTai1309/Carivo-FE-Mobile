@@ -6,7 +6,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { Check, Ticket, X } from "lucide-react-native";
+import {
+  Check,
+  Ticket,
+  TicketPercent,
+  X,
+} from "lucide-react-native";
 import type { Promotion, VehicleType } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 
@@ -14,6 +19,11 @@ export interface AppliedPromotion {
   promotion: Promotion;
   discountAmount: number;
   finalPrice: number;
+}
+
+export interface AppliedVoucher {
+  code: string;
+  discountAmount: number;
 }
 
 interface VoucherSectionProps {
@@ -24,11 +34,17 @@ interface VoucherSectionProps {
   isAuthenticated: boolean;
   loading?: boolean;
   applied?: AppliedPromotion | null;
+  appliedVoucher?: AppliedVoucher | null;
   onAppliedChange: (applied: AppliedPromotion | null) => void;
+  onVoucherChange?: (applied: AppliedVoucher | null) => void;
   onError?: (message: string) => void;
   onValidate: (
     promotionCode: string
   ) => Promise<AppliedPromotion | { error: string }>;
+  onValidateVoucher?: (
+    voucherCode: string
+  ) => Promise<AppliedVoucher | { error: string }>;
+  validatingVoucher?: boolean;
 }
 
 function formatExpiry(promo: Promotion): string {
@@ -117,11 +133,16 @@ export default function VoucherSection({
   isAuthenticated,
   loading = false,
   applied,
+  appliedVoucher,
   onAppliedChange,
+  onVoucherChange,
   onError,
   onValidate,
+  onValidateVoucher,
+  validatingVoucher = false,
 }: VoucherSectionProps) {
   const [code, setCode] = useState("");
+  const [voucherCode, setVoucherCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -170,6 +191,31 @@ export default function VoucherSection({
   const handleClear = () => {
     onAppliedChange(null);
     setCode("");
+  };
+
+  const handleApplyVoucher = async () => {
+    const trimmed = voucherCode.trim();
+    if (!trimmed) {
+      onError?.("Vui lòng nhập mã voucher.");
+      return;
+    }
+    if (!isAuthenticated) {
+      onError?.("Bạn cần đăng nhập để áp dụng voucher.");
+      return;
+    }
+    if (!onValidateVoucher) return;
+    const result = await onValidateVoucher(trimmed);
+    if ("error" in result) {
+      onError?.(result.error);
+      return;
+    }
+    onVoucherChange?.(result);
+    setVoucherCode("");
+  };
+
+  const handleClearVoucher = () => {
+    onVoucherChange?.(null);
+    setVoucherCode("");
   };
 
   return (
@@ -330,6 +376,87 @@ export default function VoucherSection({
           </View>
         ) : null}
       </View>
+
+      {onValidateVoucher ? (
+        <View className="bg-card border border-border rounded-xl p-4 gap-3 mt-3">
+          <View className="flex-row items-center gap-2">
+            <TicketPercent size={16} color="#1a56db" strokeWidth={2.4} />
+            <Text className="text-xs font-bold text-muted-foreground tracking-wide">
+              VOUCHER CỦA TÔI
+            </Text>
+          </View>
+          {appliedVoucher ? (
+            <View className="rounded-xl bg-secondary border border-primary/40 px-3 py-3 flex-row items-center gap-3">
+              <View className="w-9 h-9 rounded-lg bg-primary items-center justify-center">
+                <Check size={18} color="#ffffff" strokeWidth={3} />
+              </View>
+              <View className="flex-1">
+                <Text className="text-sm font-bold text-primary">
+                  {appliedVoucher.code}
+                </Text>
+                <Text className="text-xs text-primary/80">
+                  Voucher đã áp dụng
+                </Text>
+                {appliedVoucher.discountAmount > 0 ? (
+                  <Text className="text-xs text-primary mt-0.5">
+                    Tiết kiệm {formatCurrency(appliedVoucher.discountAmount)}
+                  </Text>
+                ) : null}
+              </View>
+              <TouchableOpacity
+                onPress={handleClearVoucher}
+                disabled={validatingVoucher}
+                className="w-9 h-9 rounded-lg bg-card border border-border items-center justify-center"
+                accessibilityRole="button"
+                accessibilityLabel="Bỏ chọn voucher"
+              >
+                <X size={16} color="#1a56db" strokeWidth={3} />
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View className="flex-row gap-2">
+              <View className="flex-1 bg-input border border-border rounded-xl px-3 justify-center">
+                <TextInput
+                  value={voucherCode}
+                  onChangeText={setVoucherCode}
+                  placeholder="Nhập mã voucher (vd: CARE_ABC123)..."
+                  placeholderTextColor="#8a96a8"
+                  editable={!validatingVoucher}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                  className="py-3 text-sm text-foreground"
+                  onSubmitEditing={handleApplyVoucher}
+                  returnKeyType="done"
+                />
+              </View>
+              <TouchableOpacity
+                onPress={handleApplyVoucher}
+                disabled={validatingVoucher || !voucherCode.trim()}
+                className={`rounded-xl px-4 justify-center ${
+                  validatingVoucher || !voucherCode.trim()
+                    ? "bg-muted"
+                    : "bg-primary"
+                }`}
+                accessibilityRole="button"
+                accessibilityLabel="Áp dụng voucher"
+              >
+                {validatingVoucher ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text className="text-white text-sm font-semibold">
+                    Áp dụng
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+          <Text className="text-[11px] text-muted-foreground leading-4">
+            Voucher là mã riêng do hệ thống tặng (thường bắt đầu bằng{" "}
+            <Text className="font-semibold">CARE_</Text>), khác với mã khuyến
+            mãi ở trên.
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

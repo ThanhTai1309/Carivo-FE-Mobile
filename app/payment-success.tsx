@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Animated,
   Easing,
+  RefreshControl,
   ScrollView,
   Share,
   StyleSheet,
@@ -18,13 +20,20 @@ import {
   CircleHelp,
   Clock4,
   CreditCard,
+  Hourglass,
   House,
   LifeBuoy,
   MapPin,
+  RefreshCw,
   ShieldCheck,
+  Wallet,
+  X,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { api, ApiError } from "@/lib/api";
 import { formatCurrency, formatDateTimeLong } from "@/lib/format";
+import type { Booking, PaymentTransaction } from "@/lib/types";
+import { useApp } from "@/providers/AppProvider";
 
 function shortBookingId(id?: string | null): string {
   if (!id) return "—";
@@ -63,14 +72,34 @@ function InfoRow({
 }
 
 function PaymentBadge({ label }: { label: string }) {
+  const Icon = label === "CASH" ? Wallet : CreditCard;
+  const text = label === "CASH" ? "Tiền mặt tại garage" : "PayOS Online";
   return (
     <View className="flex-row items-center gap-1.5">
-      <CreditCard size={18} color="#1a1f2e" strokeWidth={2} />
+      <Icon size={18} color="#1a1f2e" strokeWidth={2} />
       <Text className="text-xs font-bold text-foreground tracking-wider">
-        {label}
+        {text}
       </Text>
     </View>
   );
+}
+
+type PaymentState = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELED";
+
+function pickState(payment: PaymentTransaction | null): PaymentState {
+  if (!payment) return "PENDING";
+  switch (payment.status) {
+    case "PAID":
+      return "PAID";
+    case "FAILED":
+      return "FAILED";
+    case "EXPIRED":
+      return "EXPIRED";
+    case "CANCELED":
+      return "CANCELED";
+    default:
+      return "PENDING";
+  }
 }
 
 export default function PaymentSuccessScreen() {
@@ -83,16 +112,34 @@ export default function PaymentSuccessScreen() {
     total?: string;
     vehiclePlate?: string;
     paymentMethod?: string;
+    pending?: string;
   }>();
+  const { accessToken, isAuthenticated } = useApp();
 
-  // Animations
+  const isPayosFlow = params.paymentMethod === "PAYOS";
+  const isPendingPayos = isPayosFlow && params.pending === "1";
+
+  const [payment, setPayment] = useState<PaymentTransaction | null>(null);
+  const [booking, setBooking] = useState<Booking | null>(null);
+  const [pollState, setPollState] = useState<PaymentState>(
+    isPendingPayos ? "PENDING" : "PAID"
+  );
+  const [refreshing, setRefreshing] = useState(false);
+  const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stoppedRef = useRef(false);
+
   const ringScale = useRef(new Animated.Value(0.7)).current;
   const ringOpacity = useRef(new Animated.Value(0)).current;
   const checkScale = useRef(new Animated.Value(0)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(20)).current;
 
-  useEffect(() => {
+  const playSuccessAnimation = useCallback(() => {
+    ringScale.setValue(0.7);
+    ringOpacity.setValue(0);
+    checkScale.setValue(0);
+    fadeIn.setValue(0);
+    slideUp.setValue(20);
     Animated.sequence([
       Animated.parallel([
         Animated.timing(ringOpacity, {
@@ -127,7 +174,89 @@ export default function PaymentSuccessScreen() {
         }),
       ]),
     ]).start();
+  }, [checkScale, fadeIn, ringOpacity, ringScale, slideUp]);
+
+  useEffect(() => {
+    if (pollState === "PAID" || pollState === "FAILED") {
+      playSuccessAnimation();
+    }
+  }, [pollState, playSuccessAnimation]);
+
+  const stopPolling = useCallback(() => {
+    stoppedRef.current = true;
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current);
+      pollTimeoutRef.current = null;
+    }
   }, []);
+
+  const pollPayment = useCallback(async () => {
+    if (!accessToken || !params.bookingId || stoppedRef.current) return;
+    try {
+      const [paymentResponse, bookingResponse] = await Promise.all([
+        api.getPayosPayment(accessToken, params.bookingId),
+        api.getBooking(accessToken, params.bookingId).catch(() => null),
+      ]);
+      if (stoppedRef.current) return;
+
+      const next = paymentResponse.data?.payment ?? null;
+      setPayment(next);
+      if (bookingResponse) {
+        setBooking(bookingResponse.data);
+      }
+      const state = pickState(next);
+      setPollState(state);
+
+      if (
+        state === "PENDING" &&
+        paymentResponse.data?.poll_after_ms &&
+        !stoppedRef.current
+      ) {
+        const delay = Math.max(
+          1500,
+          Math.min(paymentResponse.data.poll_after_ms, 10000)
+        );
+        pollTimeoutRef.current = setTimeout(() => {
+          void pollPayment();
+        }, delay);
+      } else {
+        stopPolling();
+      }
+    } catch (error) {
+      if (error instanceof ApiError) {
+        // Soft error: stop polling, show last known state
+        stopPolling();
+      } else {
+        stopPolling();
+      }
+    }
+  }, [accessToken, params.bookingId, stopPolling]);
+
+  useEffect(() => {
+    if (!isPendingPayos || !isAuthenticated || !accessToken || !params.bookingId) {
+      return;
+    }
+    stoppedRef.current = false;
+    void pollPayment();
+    return () => {
+      stopPolling();
+    };
+  }, [isPendingPayos, isAuthenticated, accessToken, params.bookingId, pollPayment, stopPolling]);
+
+  const onRefresh = useCallback(async () => {
+    if (!accessToken || !params.bookingId) return;
+    setRefreshing(true);
+    try {
+      stoppedRef.current = false;
+      await pollPayment();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [accessToken, params.bookingId, pollPayment]);
+
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
 
   const bookingIdDisplay = shortBookingId(params.bookingId);
   const formattedStartTime = params.startTime
@@ -141,6 +270,22 @@ export default function PaymentSuccessScreen() {
     });
   }, [params.startTime]);
   const totalAmount = formatCurrency(Number(params.total ?? 0));
+
+  const isPaid = pollState === "PAID";
+  const isPending = pollState === "PENDING";
+  const isFailed =
+    pollState === "FAILED" || pollState === "EXPIRED" || pollState === "CANCELED";
+
+  const heroTitle = isPaid
+    ? "Thanh toán thành công!"
+    : isPending
+      ? "Đang chờ thanh toán..."
+      : "Thanh toán chưa hoàn tất";
+  const heroDescription = isPaid
+    ? "Cảm ơn bạn đã thanh toán. Chúng tôi sẽ xử lý lịch hẹn của bạn ngay."
+    : isPending
+      ? "Hệ thống đang chờ PayOS xác nhận. Bạn có thể đóng app và quay lại sau, hoặc kéo xuống để làm mới."
+      : "Thanh toán chưa hoàn tất. Vui lòng thử lại hoặc chọn phương thức khác.";
 
   const handleShare = async () => {
     if (!params.bookingId) return;
@@ -158,18 +303,34 @@ export default function PaymentSuccessScreen() {
     }
   };
 
+  const handleOpenDetail = () => {
+    if (!params.bookingId) return;
+    router.push({
+      pathname: "/booking-detail",
+      params: { id: params.bookingId },
+    });
+  };
+
+  const handleBackHome = () => router.push("/(tabs)");
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top", "bottom"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={
+          isPendingPayos ? (
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          ) : undefined
+        }
       >
-        {/* Hero */}
         <View
-          style={styles.heroBg}
+          style={[
+            styles.heroBg,
+            isFailed && { backgroundColor: "#fee2e2" },
+          ]}
           className="relative items-center pt-14 pb-10 px-6"
         >
-          {/* Decorative dots (blue, subtle) */}
           <View
             style={[
               styles.dot,
@@ -188,73 +349,116 @@ export default function PaymentSuccessScreen() {
               { top: 120, right: 28, width: 10, height: 10, opacity: 0.25 },
             ]}
           />
-          <View
-            style={[
-              styles.dot,
-              { top: 138, left: 38, width: 6, height: 6, opacity: 0.22 },
-            ]}
-          />
-          <View
-            style={[
-              styles.dot,
-              { top: 96, left: 60, width: 4, height: 4, opacity: 0.28 },
-            ]}
-          />
-          <View
-            style={[
-              styles.dot,
-              { top: 50, left: "48%", width: 5, height: 5, opacity: 0.25 },
-            ]}
-          />
 
-          {/* Check icon stack */}
           <View style={styles.checkStack}>
-            <Animated.View
-              style={[
-                styles.ringOuter,
-                {
-                  opacity: ringOpacity,
-                  transform: [{ scale: ringScale }],
-                },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.ringMiddle,
-                {
-                  opacity: ringOpacity,
-                  transform: [
+            {isPaid ? (
+              <>
+                <Animated.View
+                  style={[
+                    styles.ringOuter,
                     {
-                      scale: ringScale.interpolate({
-                        inputRange: [0.7, 1],
-                        outputRange: [0.85, 0.95],
-                      }),
+                      opacity: ringOpacity,
+                      transform: [{ scale: ringScale }],
                     },
-                  ],
-                },
-              ]}
-            />
-            <Animated.View
-              style={[
-                styles.ringInner,
-                { transform: [{ scale: checkScale }] },
-              ]}
-            >
-              <Check size={52} color="#1a5fd4" strokeWidth={3.2} />
-            </Animated.View>
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.ringMiddle,
+                    {
+                      opacity: ringOpacity,
+                      transform: [
+                        {
+                          scale: ringScale.interpolate({
+                            inputRange: [0.7, 1],
+                            outputRange: [0.85, 0.95],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.ringInner,
+                    { transform: [{ scale: checkScale }] },
+                  ]}
+                >
+                  <Check size={52} color="#1a5fd4" strokeWidth={3.2} />
+                </Animated.View>
+              </>
+            ) : isPending ? (
+              <>
+                <Animated.View
+                  style={[
+                    styles.ringOuter,
+                    {
+                      opacity: ringOpacity,
+                      transform: [{ scale: ringScale }],
+                    },
+                  ]}
+                />
+                <Animated.View
+                  style={[
+                    styles.ringMiddle,
+                    {
+                      opacity: ringOpacity,
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.ringInner,
+                    { backgroundColor: "#fff7ed", borderColor: "#fed7aa" },
+                  ]}
+                >
+                  <ActivityIndicator size="large" color="#ea580c" />
+                </View>
+              </>
+            ) : (
+              <>
+                <Animated.View
+                  style={[
+                    styles.ringOuter,
+                    {
+                      opacity: ringOpacity,
+                      transform: [{ scale: ringScale }],
+                      borderColor: "rgba(185,28,28,0.25)",
+                      backgroundColor: "rgba(185,28,28,0.04)",
+                    },
+                  ]}
+                />
+                <View
+                  style={[
+                    styles.ringInner,
+                    { backgroundColor: "#ffffff", borderColor: "#fecaca" },
+                  ]}
+                >
+                  <X size={52} color="#b91c1c" strokeWidth={3.2} />
+                </View>
+              </>
+            )}
           </View>
 
-          <Text className="text-[26px] font-bold text-primary text-center mt-5 tracking-tight px-4">
-            Đặt lịch thành công!
+          <Text
+            className={`text-[26px] font-bold text-center mt-5 tracking-tight px-4 ${
+              isFailed ? "text-red-600" : "text-primary"
+            }`}
+          >
+            {heroTitle}
           </Text>
           <Text className="text-sm text-muted-foreground text-center mt-2 leading-relaxed px-6">
-            Cảm ơn bạn đã đặt dịch vụ tại Carivo. Chúng tôi sẽ liên hệ với bạn
-            để xác nhận trong ít phút.
+            {heroDescription}
           </Text>
 
-          {/* Booking ID strip */}
           <View className="flex-row items-center gap-2 mt-5 bg-card border border-border rounded-full px-4 py-2">
-            <ShieldCheck size={14} color="#16a34a" strokeWidth={2.4} />
+            {isPaid ? (
+              <ShieldCheck size={14} color="#16a34a" strokeWidth={2.4} />
+            ) : isPending ? (
+              <Hourglass size={14} color="#ea580c" strokeWidth={2.4} />
+            ) : (
+              <X size={14} color="#b91c1c" strokeWidth={2.4} />
+            )}
             <Text className="text-xs font-semibold text-foreground">
               Mã booking:
             </Text>
@@ -264,7 +468,6 @@ export default function PaymentSuccessScreen() {
           </View>
         </View>
 
-        {/* Combined info card */}
         <Animated.View
           style={{
             opacity: fadeIn,
@@ -304,7 +507,6 @@ export default function PaymentSuccessScreen() {
               </>
             ) : null}
 
-            {/* Total row */}
             <View className="h-px bg-border my-4" />
             <View className="flex-row items-center justify-between">
               <View>
@@ -318,25 +520,110 @@ export default function PaymentSuccessScreen() {
               </Text>
             </View>
 
-            {/* Payment method */}
             <View className="h-px bg-border my-4" />
             <View className="flex-row items-center justify-between">
-              <PaymentBadge label="Thanh toán tại garage" />
-              <View className="flex-row items-center gap-2">
-                <View style={styles.cardLogo}>
-                  <Text style={styles.cardLogoText}>VISA</Text>
-                </View>
-                <View style={[styles.cardLogo, { backgroundColor: "#1a1f2e" }]}>
-                  <Text style={[styles.cardLogoText, { color: "#f59e0b" }]}>
-                    MC
+              <PaymentBadge label={params.paymentMethod ?? "CASH"} />
+              {isPayosFlow ? (
+                <View className="flex-row items-center gap-1.5">
+                  {isPending ? (
+                    <ActivityIndicator size="small" color="#1a5fd4" />
+                  ) : isPaid ? (
+                    <Check size={14} color="#16a34a" strokeWidth={3} />
+                  ) : (
+                    <X size={14} color="#b91c1c" strokeWidth={3} />
+                  )}
+                  <Text
+                    className={`text-xs font-semibold ${
+                      isPaid
+                        ? "text-emerald-600"
+                        : isPending
+                          ? "text-amber-600"
+                          : "text-red-600"
+                    }`}
+                  >
+                    {isPaid
+                      ? "Đã thanh toán"
+                      : isPending
+                        ? "Đang chờ PayOS"
+                        : "Chưa hoàn tất"}
                   </Text>
                 </View>
-              </View>
+              ) : (
+                <View style={styles.cardLogo}>
+                  <Text style={styles.cardLogoText}>CASH</Text>
+                </View>
+              )}
             </View>
+
+            {payment && isPayosFlow ? (
+              <>
+                <View className="h-px bg-border my-4" />
+                <View className="gap-2">
+                  <View className="flex-row items-center justify-between">
+                    <Text className="text-xs text-muted-foreground">
+                      Mã giao dịch PayOS
+                    </Text>
+                    <Text className="text-xs font-semibold text-foreground">
+                      #{payment.order_code}
+                    </Text>
+                  </View>
+                  {payment.expires_at ? (
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-xs text-muted-foreground">
+                        Hết hạn
+                      </Text>
+                      <Text className="text-xs font-medium text-foreground">
+                        {formatDateTimeLong(payment.expires_at)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+
+            {booking?.payment_status ? (
+              <>
+                <View className="h-px bg-border my-4" />
+                <View className="flex-row items-center justify-between">
+                  <Text className="text-xs text-muted-foreground">
+                    Trạng thái booking
+                  </Text>
+                  <Text className="text-xs font-semibold text-foreground">
+                    {booking.payment_status}
+                  </Text>
+                </View>
+              </>
+            ) : null}
           </View>
         </Animated.View>
 
-        {/* CTAs */}
+        {isPending ? (
+          <View className="px-4 mt-5">
+            <View className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex-row gap-2.5">
+              <RefreshCw size={16} color="#a16207" strokeWidth={2.4} />
+              <Text className="text-xs text-amber-800 flex-1 leading-5">
+                Hệ thống tự động kiểm tra trạng thái PayOS mỗi vài giây. Bạn
+                cũng có thể kéo xuống để làm mới ngay.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isFailed ? (
+          <View className="px-4 mt-5 gap-3">
+            <TouchableOpacity
+              onPress={handleOpenDetail}
+              activeOpacity={0.85}
+              className="bg-primary rounded-xl py-4 flex-row items-center justify-center gap-2"
+            >
+              <RefreshCw size={18} color="#ffffff" strokeWidth={2.6} />
+              <Text className="text-white font-bold text-base">
+                Thử thanh toán lại
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         <Animated.View
           style={{
             opacity: fadeIn,
@@ -345,12 +632,12 @@ export default function PaymentSuccessScreen() {
           className="px-4 mt-5 gap-3"
         >
           <TouchableOpacity
-            onPress={() => router.push("/(tabs)/profile")}
+            onPress={handleOpenDetail}
             activeOpacity={0.85}
             className="bg-primary rounded-xl py-4 flex-row items-center justify-center gap-2"
           >
             <Text className="text-white font-bold text-base">
-              Xem lịch hẹn của tôi
+              {isPaid ? "Xem chi tiết lịch hẹn" : "Xem lịch hẹn của tôi"}
             </Text>
             <ChevronRight size={20} color="#ffffff" strokeWidth={2.6} />
           </TouchableOpacity>
@@ -368,7 +655,7 @@ export default function PaymentSuccessScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              onPress={() => router.push("/(tabs)")}
+              onPress={handleBackHome}
               activeOpacity={0.85}
               className="flex-1 bg-card border border-border rounded-xl py-3.5 flex-row items-center justify-center gap-2"
             >
@@ -380,7 +667,6 @@ export default function PaymentSuccessScreen() {
           </View>
         </Animated.View>
 
-        {/* Help footer */}
         <Animated.View
           style={{
             opacity: fadeIn,
@@ -465,8 +751,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   cardLogo: {
-    width: 36,
-    height: 24,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 4,
     backgroundColor: "#1a5fd4",
     alignItems: "center",

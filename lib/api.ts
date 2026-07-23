@@ -4,11 +4,13 @@ import type {
   AvailableSlotsPayload,
   Booking,
   BookingInspection,
+  CustomerPaymentResponse,
   Garage,
   LoyaltySummary,
   LoyaltyTierRule,
   LoyaltyTransaction,
   NotificationItem,
+  PaymentTransaction,
   PhoneVerificationChallenge,
   PhoneVerificationToken,
   Promotion,
@@ -343,6 +345,7 @@ export const api = {
       add_on_service_ids?: string[];
       start_time: string;
       promotion_code?: string;
+      voucher_code?: string;
       used_points?: number;
       note?: string;
     }
@@ -496,6 +499,35 @@ export const api = {
     return request<ApiEnvelope<BookingInspection[]>>(
       `/bookings/${bookingId}/inspections`,
       { token }
+    );
+  },
+
+  createPayosPayment(token: string, bookingId: string) {
+    return request<ApiEnvelope<CustomerPaymentResponse>>(
+      `/payments/bookings/${bookingId}/payos`,
+      {
+        method: "POST",
+        token,
+        body: {},
+      }
+    );
+  },
+
+  getPayosPayment(token: string, bookingId: string) {
+    return request<ApiEnvelope<CustomerPaymentResponse>>(
+      `/payments/bookings/${bookingId}/payos`,
+      { token }
+    );
+  },
+
+  cancelPayosPayment(token: string, paymentId: string, reason?: string) {
+    return request<ApiEnvelope<{ payment: PaymentTransaction }>>(
+      `/admin/payments/${paymentId}/cancel`,
+      {
+        method: "PATCH",
+        token,
+        body: reason ? { reason } : {},
+      }
     );
   },
 

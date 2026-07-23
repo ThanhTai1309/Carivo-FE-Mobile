@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   RefreshControl,
   ScrollView,
   Text,
@@ -13,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
+  AlertTriangle,
   CalendarClock,
   CarFront,
   CircleCheck,
@@ -32,6 +34,7 @@ import {
   Star,
   Wrench,
   X,
+  XCircle,
 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
@@ -44,6 +47,7 @@ import {
 import type {
   Booking,
   BookingInspection,
+  PaymentTransaction,
   WashHistory,
 } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
@@ -257,6 +261,11 @@ export default function BookingDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [payosPayment, setPayosPayment] = useState<PaymentTransaction | null>(
+    null
+  );
+  const [openingCheckout, setOpeningCheckout] = useState(false);
+  const [cancellingPayment, setCancellingPayment] = useState(false);
 
   const loadData = useCallback(
     async (silent = false) => {
@@ -270,32 +279,37 @@ export default function BookingDetailScreen() {
         const fetchedBooking = bookingResponse.data;
         setBooking(fetchedBooking);
 
-        const [inspectionResponse, washListResponse] = await Promise.all([
-          (api.getBookingInspections(accessToken, bookingId) as Promise<
-            Awaited<ReturnType<typeof api.getBookingInspections>>
-          >).catch(
-            () =>
-              ({
-                success: true,
-                data: [] as BookingInspection[],
-              }) as Awaited<
-                ReturnType<typeof api.getBookingInspections>
-              >
-          ),
-          api.getWashHistories(accessToken, { booking_id: bookingId }).catch(
-            () =>
-              ({
-                success: true,
-                data: [] as WashHistory[],
-              }) as Awaited<
-                ReturnType<typeof api.getWashHistories>
-              >
-          ),
-        ]);
+        const [inspectionResponse, washListResponse, payosResponse] =
+          await Promise.all([
+            (api.getBookingInspections(accessToken, bookingId) as Promise<
+              Awaited<ReturnType<typeof api.getBookingInspections>>
+            >).catch(
+              () =>
+                ({
+                  success: true,
+                  data: [] as BookingInspection[],
+                }) as Awaited<
+                  ReturnType<typeof api.getBookingInspections>
+                >
+            ),
+            api.getWashHistories(accessToken, { booking_id: bookingId }).catch(
+              () =>
+                ({
+                  success: true,
+                  data: [] as WashHistory[],
+                }) as Awaited<
+                  ReturnType<typeof api.getWashHistories>
+                >
+            ),
+            api.getPayosPayment(accessToken, bookingId).catch(() => null),
+          ]);
 
         setInspections(inspectionResponse.data ?? []);
         const washData = (washListResponse.data ?? [])[0] ?? null;
         setWash(washData);
+
+        const payosData = payosResponse?.data?.payment ?? null;
+        setPayosPayment(payosData);
       } catch (error) {
         const message =
           error instanceof ApiError
@@ -363,6 +377,90 @@ export default function BookingDetailScreen() {
     });
   };
 
+  const handlePayNow = async () => {
+    if (!accessToken || !booking) return;
+    setOpeningCheckout(true);
+    try {
+      const paymentResponse = await api.createPayosPayment(
+        accessToken,
+        booking.id
+      );
+      const checkoutUrl = paymentResponse.data?.payment?.checkout_url;
+      if (!checkoutUrl) {
+        Alert.alert(
+          "Không có liên kết thanh toán",
+          "Vui lòng thử lại sau ít phút."
+        );
+        return;
+      }
+      const supported = await Linking.canOpenURL(checkoutUrl);
+      if (!supported) {
+        Alert.alert(
+          "Không thể mở liên kết",
+          "Thiết bị không hỗ trợ mở liên kết thanh toán."
+        );
+        return;
+      }
+      await Linking.openURL(checkoutUrl);
+      router.push({
+        pathname: "/payment-success",
+        params: {
+          bookingId: booking.id,
+          total: String(booking.final_price ?? booking.original_price ?? 0),
+          paymentMethod: "PAYOS",
+          pending: "1",
+          garageName: booking.garage?.name,
+          serviceName: booking.service_package?.name,
+          startTime: booking.start_time,
+          vehiclePlate: booking.vehicle?.raw_license_plate,
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Không thể khởi tạo thanh toán.";
+      Alert.alert("Lỗi thanh toán", message);
+    } finally {
+      setOpeningCheckout(false);
+    }
+  };
+
+  const handleCancelPayos = () => {
+    if (!accessToken || !payosPayment) return;
+    Alert.alert(
+      "Hủy thanh toán PayOS",
+      "Bạn có chắc muốn hủy giao dịch PayOS đang chờ? Bạn có thể tạo lại liên kết thanh toán sau.",
+      [
+        { text: "Không", style: "cancel" },
+        {
+          text: "Hủy thanh toán",
+          style: "destructive",
+          onPress: async () => {
+            setCancellingPayment(true);
+            try {
+              await api.cancelPayosPayment(
+                accessToken,
+                payosPayment.id,
+                "Customer hủy từ app"
+              );
+              await loadData(true);
+              Alert.alert("Thành công", "Đã hủy giao dịch PayOS.");
+            } catch (error) {
+              const message =
+                error instanceof ApiError
+                  ? error.message
+                  : "Không thể hủy thanh toán.";
+              Alert.alert("Lỗi", message);
+            } finally {
+              setCancellingPayment(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const timelineSteps = useMemo(
     () => (booking ? buildTimelineSteps(booking, inspections.length, wash) : []),
     [booking, inspections.length, wash]
@@ -371,6 +469,17 @@ export default function BookingDetailScreen() {
   const canCancel =
     booking && (booking.status === "PENDING" || booking.status === "CONFIRMED");
   const canRebook = booking && booking.status === "COMPLETED";
+  const isPayosPending =
+    payosPayment &&
+    (payosPayment.status === "PENDING" ||
+      payosPayment.status === "INITIATED" ||
+      payosPayment.status === "CANCELING");
+  const canPayNow =
+    booking &&
+    booking.status === "COMPLETED" &&
+    booking.payment_status !== "PAID" &&
+    !isPayosPending;
+  const canCancelPayos = booking && booking.status === "COMPLETED" && isPayosPending;
 
   if (!isHydrated || loading) {
     return (
@@ -606,6 +715,17 @@ export default function BookingDetailScreen() {
                 </Text>
               </View>
             ) : null}
+            {booking.voucher_discount_amount &&
+            booking.voucher_discount_amount > 0 ? (
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm text-muted-foreground">
+                  Giảm giá voucher
+                </Text>
+                <Text className="text-sm font-medium text-emerald-600">
+                  −{formatCurrency(booking.voucher_discount_amount)}
+                </Text>
+              </View>
+            ) : null}
             <View className="h-px bg-border my-1" />
             <View className="flex-row items-center justify-between">
               <Text className="text-sm font-semibold text-foreground">
@@ -667,6 +787,16 @@ export default function BookingDetailScreen() {
                 </Text>
                 <Text className="text-xs font-bold text-primary uppercase">
                   {booking.promotion.code}
+                </Text>
+              </View>
+            ) : null}
+            {booking.customer_voucher ? (
+              <View className="flex-row items-center justify-between mt-1">
+                <Text className="text-xs text-muted-foreground">
+                  Mã voucher
+                </Text>
+                <Text className="text-xs font-bold text-primary uppercase">
+                  {booking.customer_voucher.code ?? "Đã áp dụng"}
                 </Text>
               </View>
             ) : null}
@@ -732,8 +862,105 @@ export default function BookingDetailScreen() {
           </View>
         ) : null}
 
+        {/* Payment banner for UNPAID completed bookings */}
+        {canPayNow ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4 flex-row gap-3">
+            <AlertTriangle size={20} color="#a16207" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-amber-800">
+                Lịch hẹn chưa được thanh toán
+              </Text>
+              <Text className="text-xs text-amber-700 mt-1 leading-5">
+                Garage đã hoàn tất dịch vụ. Vui lòng thanh toán{" "}
+                {formatCurrency(
+                  booking.final_price ?? booking.original_price ?? 0
+                )}{" "}
+                để hoàn tất.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isPayosPending && booking ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-blue-50 border border-blue-200 p-4 gap-2">
+            <View className="flex-row items-center gap-2">
+              <CreditCard size={18} color="#1a5fd4" strokeWidth={2.4} />
+              <Text className="text-sm font-bold text-blue-800">
+                Đang chờ thanh toán PayOS
+              </Text>
+            </View>
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs text-blue-700">Mã giao dịch</Text>
+              <Text className="text-xs font-bold text-blue-900">
+                #{payosPayment?.order_code}
+              </Text>
+            </View>
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs text-blue-700">Số tiền</Text>
+              <Text className="text-xs font-bold text-blue-900">
+                {formatCurrency(payosPayment?.amount ?? 0)}
+              </Text>
+            </View>
+            {payosPayment?.expires_at ? (
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs text-blue-700">Hết hạn</Text>
+                <Text className="text-xs font-medium text-blue-900">
+                  {formatDateTime(payosPayment.expires_at)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* Actions */}
         <View className="px-4 mt-6 gap-3">
+          {canPayNow ? (
+            <TouchableOpacity
+              onPress={handlePayNow}
+              disabled={openingCheckout}
+              activeOpacity={0.85}
+              className="rounded-2xl bg-primary py-4 flex-row items-center justify-center gap-2"
+              style={{
+                shadowColor: "#1a5fd4",
+                shadowOffset: { width: 0, height: 6 },
+                shadowOpacity: 0.28,
+                shadowRadius: 10,
+                elevation: 4,
+              }}
+            >
+              {openingCheckout ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <>
+                  <CreditCard size={18} color="#ffffff" strokeWidth={2.4} />
+                  <Text className="text-white font-bold text-base">
+                    Thanh toán ngay qua PayOS
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
+          {canCancelPayos ? (
+            <TouchableOpacity
+              onPress={handleCancelPayos}
+              disabled={cancellingPayment}
+              activeOpacity={0.85}
+              className="rounded-2xl border border-slate-300 bg-white py-3.5 flex-row items-center justify-center gap-2"
+            >
+              {cancellingPayment ? (
+                <ActivityIndicator color="#475569" />
+              ) : (
+                <>
+                  <XCircle size={16} color="#475569" strokeWidth={2.4} />
+                  <Text className="text-slate-700 font-semibold text-sm">
+                    Hủy giao dịch PayOS đang chờ
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : null}
+
           {canCancel ? (
             <TouchableOpacity
               onPress={handleCancel}
