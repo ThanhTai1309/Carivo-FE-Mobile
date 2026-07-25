@@ -46,7 +46,9 @@ export default function GarageCard({
           </Text>
           <View className="flex-row items-center gap-1 mt-1">
             <MapPin size={12} color="#8a96a8" strokeWidth={4} />
-            <Text className="text-xs text-muted-foreground">{distance}</Text>
+            <Text className="text-xs text-muted-foreground" numberOfLines={1}>
+              {distance}
+            </Text>
           </View>
           <View className="flex-row items-center gap-1 mt-0.5">
             <Star size={12} color="#1a56db" strokeWidth={4} />

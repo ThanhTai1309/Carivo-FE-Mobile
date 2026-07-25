@@ -20,6 +20,14 @@ export default function RootLayout() {
         <Stack.Screen name="register" />
         <Stack.Screen name="forgot-password" />
         <Stack.Screen name="notifications" />
+        <Stack.Screen name="booking/handover/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="booking/incident/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="history" />
+        <Stack.Screen name="history/[id]" />
+        <Stack.Screen name="waitlist" />
+        <Stack.Screen name="waitlist/new" />
+        <Stack.Screen name="waitlist/[id]" />
+        <Stack.Screen name="support/cases/[id]" />
       </Stack>
     </AppProvider>
   );

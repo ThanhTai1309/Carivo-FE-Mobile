@@ -4,6 +4,7 @@ interface PriceRow {
   label: string;
   value: string;
   danger?: boolean;
+  success?: boolean;
 }
 
 interface PriceSummaryProps {
@@ -19,7 +20,11 @@ export default function PriceSummary({ rows, total }: PriceSummaryProps) {
           <Text className="text-sm text-foreground">{row.label}</Text>
           <Text
             className={`text-sm font-medium ${
-              row.danger ? "text-danger" : "text-foreground"
+              row.danger
+                ? "text-danger"
+                : row.success
+                ? "text-emerald-600"
+                : "text-foreground"
             }`}
           >
             {row.value}

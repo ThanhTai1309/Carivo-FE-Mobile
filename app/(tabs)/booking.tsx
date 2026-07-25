@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -15,6 +15,7 @@ import {
   Bike,
   Car,
   CheckSquare,
+  ExternalLink,
   HelpCircle,
   Square,
 } from "lucide-react-native";
@@ -47,16 +48,21 @@ function toVehicleName(vehicle: Vehicle) {
 
 export default function BookingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ servicePackageId?: string }>();
-  const { accessToken, isAuthenticated } = useApp();
+  const params = useLocalSearchParams<{
+    garageId?: string;
+    servicePackageId?: string;
+    vehicleId?: string;
+  }>();
+  const incomingServiceId = params.servicePackageId ?? "";
+  const incomingGarageId = params.garageId ?? "";
+  const incomingVehicleId = params.vehicleId ?? "";
+  const { accessToken, isAuthenticated, isHydrated } = useApp();
   const [garages, setGarages] = useState<Garage[]>([]);
   const [services, setServices] = useState<ServicePackage[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [selectedGarageId, setSelectedGarageId] = useState("");
   const [selectedVehicleId, setSelectedVehicleId] = useState("");
-  const [selectedServiceId, setSelectedServiceId] = useState(
-    params.servicePackageId ?? ""
-  );
+  const [selectedServiceId, setSelectedServiceId] = useState(incomingServiceId);
   const [addOnServiceIds, setAddOnServiceIds] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState(toDateInputValue(new Date()));
   const [selectedSlot, setSelectedSlot] = useState<AvailableSlot | null>(null);
@@ -116,7 +122,12 @@ export default function BookingScreen() {
       const serviceData = servicesResponse.data ?? [];
       setGarages(garageData);
       setServices(serviceData);
-      setSelectedGarageId((current) => current || garageData[0]?.id || "");
+      setSelectedGarageId((current) => {
+        if (incomingGarageId && garageData.some((g) => g.id === incomingGarageId)) {
+          return incomingGarageId;
+        }
+        return current || garageData[0]?.id || "";
+      });
 
       if (isAuthenticated && accessToken) {
         const vehiclesResponse = await api.getVehicles(accessToken, {
@@ -125,13 +136,20 @@ export default function BookingScreen() {
         });
         const vehicleData = vehiclesResponse.data ?? [];
         setVehicles(vehicleData);
-        setSelectedVehicleId(
-          (current) =>
+        setSelectedVehicleId((current) => {
+          if (
+            incomingVehicleId &&
+            vehicleData.some((v) => v.id === incomingVehicleId)
+          ) {
+            return incomingVehicleId;
+          }
+          return (
             current ||
             vehicleData.find((vehicle) => vehicle.is_default)?.id ||
             vehicleData[0]?.id ||
             ""
-        );
+          );
+        });
       } else {
         setVehicles([]);
         setSelectedVehicleId("");
@@ -154,7 +172,7 @@ export default function BookingScreen() {
     if (!selectedVehicle) {
       setSelectedServiceId((current) => {
         if (current && services.find((s) => s.id === current)?.service_type !== "WASH") {
-          return params.servicePackageId ?? "";
+          return incomingServiceId;
         }
         return current;
       });
@@ -228,6 +246,38 @@ export default function BookingScreen() {
     addOnServiceIds,
   ]);
 
+  const handleJoinWaitlist = useCallback(async () => {
+    if (!accessToken) {
+      router.push("/login");
+      return;
+    }
+    if (
+      !selectedGarageId ||
+      !selectedServiceId ||
+      !selectedVehicleId
+    ) {
+      Alert.alert(
+        "Thiếu thông tin",
+        "Vui lòng chọn garage, phương tiện và dịch vụ trước khi vào danh sách chờ."
+      );
+      return;
+    }
+    router.push({
+      pathname: "/waitlist/new",
+      params: {
+        garageId: selectedGarageId,
+        servicePackageId: selectedServiceId,
+        vehicleId: selectedVehicleId,
+      },
+    });
+  }, [
+    accessToken,
+    router,
+    selectedGarageId,
+    selectedServiceId,
+    selectedVehicleId,
+  ]);
+
   if (loading) {
     return (
       <SafeAreaView className="flex-1 bg-background">
@@ -277,6 +327,7 @@ export default function BookingScreen() {
 
   const basePrice = selectedService?.base_price ?? 0;
   const addOnTotal = selectedAddOns.reduce((sum, s) => sum + (s.base_price ?? 0), 0);
+
   const totalPrice = basePrice + addOnTotal;
   const canContinue = Boolean(selectedGarage && selectedService && selectedSlot);
 
@@ -336,24 +387,39 @@ export default function BookingScreen() {
 
           <View className="gap-3">
             {garages.map((garage) => (
-              <GarageCard
-                key={garage.id}
-                name={garage.name}
-                distance={garage.address ?? "Xem chi tiết tại hồ sơ garage"}
-                rating={
-                  garage.rating_average
-                    ? `${garage.rating_average.toFixed(1)} (${garage.rating_count ?? 0} đánh giá)`
-                    : "Garage công khai"
-                }
-                imageUrl={
-                  garage.cover_image_url ??
-                  garage.image_url ??
-                  "https://storage.googleapis.com/banani-generated-images/generated-images/f22f33ae-2e14-4995-a422-0101ae3bdda3.jpg"
-                }
-                badge={garage.id === selectedGarageId ? "Đã chọn" : undefined}
-                selected={garage.id === selectedGarageId}
-                onPress={() => setSelectedGarageId(garage.id)}
-              />
+              <View key={garage.id} className="gap-1.5">
+                <GarageCard
+                  name={garage.name}
+                  distance={garage.address ?? "Xem chi tiết tại hồ sơ garage"}
+                  rating={
+                    garage.rating_average
+                      ? `${garage.rating_average.toFixed(1)} (${garage.rating_count ?? 0} đánh giá)`
+                      : "Garage công khai"
+                  }
+                  imageUrl={
+                    garage.cover_image_url ??
+                    garage.image_url ??
+                    "https://storage.googleapis.com/banani-generated-images/generated-images/f22f33ae-2e14-4995-a422-0101ae3bdda3.jpg"
+                  }
+                  badge={garage.id === selectedGarageId ? "Đã chọn" : undefined}
+                  selected={garage.id === selectedGarageId}
+                  onPress={() => setSelectedGarageId(garage.id)}
+                />
+                <TouchableOpacity
+                  onPress={() =>
+                    router.push({
+                      pathname: "/garage/[id]",
+                      params: { id: garage.id },
+                    })
+                  }
+                  className="self-start flex-row items-center gap-1 px-2 py-1"
+                >
+                  <ExternalLink size={12} color="#1a5fd4" strokeWidth={2.4} />
+                  <Text className="text-xs text-primary font-semibold">
+                    Xem chi tiết garage
+                  </Text>
+                </TouchableOpacity>
+              </View>
             ))}
           </View>
         </View>
@@ -555,6 +621,19 @@ export default function BookingScreen() {
               <Text className="text-sm text-muted-foreground mt-1">
                 Thử garage khác, ngày khác hoặc bỏ tick các dịch vụ thêm.
               </Text>
+              {isAuthenticated &&
+              selectedGarageId &&
+              selectedServiceId &&
+              selectedVehicleId ? (
+                <TouchableOpacity
+                  onPress={() => handleJoinWaitlist()}
+                  className="mt-3 rounded-xl bg-primary py-3 flex-row items-center justify-center gap-2"
+                >
+                  <Text className="text-white font-bold text-sm">
+                    Vào danh sách chờ
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         ) : null}

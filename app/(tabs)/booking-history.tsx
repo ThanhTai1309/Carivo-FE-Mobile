@@ -52,6 +52,17 @@ function classifyTab(status: Booking["status"]): FilterTab {
   return "ONGOING";
 }
 
+function timeUntilStart(iso: string): string {
+  const delta = new Date(iso).getTime() - Date.now();
+  if (delta <= 0) return "Đã đến";
+  const mins = Math.floor(delta / 60000);
+  if (mins < 60) return `Còn ${mins} phút`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `Còn ${hours} giờ`;
+  const days = Math.floor(hours / 24);
+  return `Còn ${days} ngày`;
+}
+
 function StatusPill({ status }: { status: Booking["status"] }) {
   const palette: Record<string, { bg: string; fg: string; label: string }> = {
     PENDING: { bg: "#fef3c7", fg: "#a16207", label: "Chờ xác nhận" },
@@ -139,6 +150,14 @@ function BookingCard({
             {formatCurrency(booking.final_price ?? booking.original_price)}
           </Text>
         </View>
+
+        {booking.status === "PENDING" || booking.status === "CONFIRMED" ? (
+          <View className="self-start mt-2 flex-row items-center gap-1 bg-blue-50 px-2 py-0.5 rounded-full">
+            <Text className="text-[10px] font-bold text-blue-700">
+              {timeUntilStart(booking.start_time)}
+            </Text>
+          </View>
+        ) : null}
 
         {typeof booking.earned_points === "number" && booking.earned_points > 0 ? (
           <View className="flex-row items-center gap-1 mt-2 self-start bg-amber-50 px-2 py-0.5 rounded-full">

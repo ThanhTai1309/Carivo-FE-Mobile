@@ -22,9 +22,17 @@ interface RegisterPayload {
   phone_verification_token: string;
 }
 
+export type UploadPurpose =
+  | "USER_AVATAR"
+  | "VEHICLE_PHOTO"
+  | "BOOKING_PROBLEM"
+  | "CUSTOMER_CASE_EVIDENCE"
+  | "HANDOVER_DOCUMENT";
+
 export interface UploadedFile {
   id: string;
   url: string;
+  purpose?: UploadPurpose;
 }
 
 interface AppContextValue {
@@ -37,7 +45,10 @@ interface AppContextValue {
   login: (phone: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  requestPhoneVerification: (phone: string) => Promise<PhoneVerificationChallenge>;
+  requestPhoneVerification: (
+    phone: string,
+    purpose?: "REGISTER" | "CHANGE_PHONE"
+  ) => Promise<PhoneVerificationChallenge>;
   verifyPhoneOtp: (
     challengeId: string,
     otp: string
@@ -61,7 +72,11 @@ interface AppContextValue {
     currentPassword: string,
     newPassword: string
   ) => Promise<void>;
-  uploadImage: (uri: string, mimeType?: string) => Promise<UploadedFile>;
+  uploadImage: (
+    uri: string,
+    mimeType?: string,
+    purpose?: UploadPurpose
+  ) => Promise<UploadedFile>;
 }
 
 const TOKEN_STORAGE_KEY = "@carivo/access-token";
@@ -185,8 +200,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const requestPhoneVerification = async (phone: string) => {
-    const response = await api.requestPhoneVerification(phone);
+  const requestPhoneVerification = async (
+    phone: string,
+    purpose: "REGISTER" | "CHANGE_PHONE" = "REGISTER"
+  ) => {
+    const response = await api.requestPhoneVerification(phone, purpose);
     return response.data;
   };
 
@@ -248,7 +266,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     await api.changePassword(accessToken, currentPassword, newPassword);
   };
 
-  const uploadImage = async (uri: string, mimeType?: string) => {
+  const uploadImage = async (
+    uri: string,
+    mimeType?: string,
+    purpose: UploadPurpose = "USER_AVATAR"
+  ) => {
     if (!accessToken) {
       throw new Error("Dang nhap de tiep tuc");
     }
@@ -260,9 +282,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       name: fileName,
       type: mimeType ?? "image/jpeg",
     } as unknown as Blob);
+    formData.append("purpose", purpose);
 
     const response = await api.uploadFile(accessToken, formData);
-    return response.data;
+    return { ...response.data, purpose };
   };
 
   const value = useMemo<AppContextValue>(

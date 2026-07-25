@@ -24,6 +24,8 @@ export interface AppliedPromotion {
 export interface AppliedVoucher {
   code: string;
   discountAmount: number;
+  voucherId?: string;
+  expiresAt?: string | null;
 }
 
 interface VoucherSectionProps {

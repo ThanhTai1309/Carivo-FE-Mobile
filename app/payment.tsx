@@ -14,6 +14,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { ArrowLeft, ArrowRight, ExternalLink } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookingInfoCard from "@/components/payment/BookingInfoCard";
+import LoadingButton from "@/components/common/LoadingButton";
 import PaymentMethodList from "@/components/payment/PaymentMethodList";
 import PriceSummary from "@/components/payment/PriceSummary";
 import VoucherSection, {
@@ -60,13 +61,22 @@ export default function PaymentScreen() {
     null
   );
   const [promoDiscount, setPromoDiscount] = useState(0);
+  const [voucherDiscount, setVoucherDiscount] = useState(0);
   const [pointsDiscount, setPointsDiscount] = useState(0);
   const [currentPoints, setCurrentPoints] = useState(0);
+  const [pointMultiplier, setPointMultiplier] = useState(1);
   const [loading, setLoading] = useState(true);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
 
   const basePrice = Number(params.price ?? 0);
-  const total = Math.max(0, basePrice - promoDiscount - pointsDiscount);
+  const total = Math.max(
+    0,
+    basePrice - promoDiscount - voucherDiscount - pointsDiscount
+  );
+  const estimatedEarnedPoints = Math.max(
+    0,
+    Math.round((total / 1000) * pointMultiplier)
+  );
 
   useEffect(() => {
     const loadData = async () => {
@@ -91,6 +101,10 @@ export default function PaymentScreen() {
           setCurrentPoints(
             loyaltyResponse.data.loyalty?.available_points ?? 0
           );
+          const multiplier = loyaltyResponse.data.current_tier_rule?.point_multiplier;
+          if (typeof multiplier === "number" && multiplier > 0) {
+            setPointMultiplier(multiplier);
+          }
         } catch (error) {
           const message =
             error instanceof ApiError
@@ -124,7 +138,9 @@ export default function PaymentScreen() {
 
   useEffect(() => {
     setPromoDiscount(0);
+    setVoucherDiscount(0);
     setAppliedPromo(null);
+    setAppliedVoucher(null);
   }, [params.servicePackageId]);
 
   const handleAppliedChange = useCallback(
@@ -177,10 +193,44 @@ export default function PaymentScreen() {
       if (!trimmed) {
         return { error: "Vui lòng nhập mã voucher." };
       }
-      return {
-        code: trimmed.toUpperCase(),
-        discountAmount: 0,
-      };
+      if (!accessToken) {
+        return { error: "Bạn cần đăng nhập để áp dụng voucher." };
+      }
+      if (!params.servicePackageId) {
+        return { error: "Thiếu thông tin dịch vụ để áp voucher." };
+      }
+      try {
+        const response = await api.validateVoucher(
+          accessToken,
+          trimmed.toUpperCase(),
+          params.servicePackageId
+        );
+        const voucher = response.data?.voucher;
+        const discount = response.data?.discount_amount ?? 0;
+        if (!voucher) {
+          return { error: "Voucher không hợp lệ hoặc đã được sử dụng." };
+        }
+        return {
+          code: voucher.code,
+          discountAmount: discount,
+          voucherId: voucher.id,
+          expiresAt: voucher.expires_at ?? null,
+        };
+      } catch (error) {
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : "Mã voucher không hợp lệ hoặc đã hết hạn.";
+        return { error: message };
+      }
+    },
+    [accessToken, params.servicePackageId]
+  );
+
+  const handleVoucherChange = useCallback(
+    (next: AppliedVoucher | null) => {
+      setAppliedVoucher(next);
+      setVoucherDiscount(next?.discountAmount ?? 0);
     },
     []
   );
@@ -201,10 +251,10 @@ export default function PaymentScreen() {
         label: appliedVoucher
           ? `Voucher (${appliedVoucher.code})`
           : "Voucher",
-        value: appliedVoucher?.discountAmount
-          ? `- ${formatCurrency(appliedVoucher.discountAmount)}`
+        value: voucherDiscount
+          ? `- ${formatCurrency(voucherDiscount)}`
           : formatCurrency(0),
-        danger: (appliedVoucher?.discountAmount ?? 0) > 0,
+        danger: voucherDiscount > 0,
       },
       {
         label: "Điểm thưởng",
@@ -213,11 +263,19 @@ export default function PaymentScreen() {
           : formatCurrency(0),
         danger: pointsDiscount > 0,
       },
+      {
+        label: `Điểm dự kiến tích lũy (x${pointMultiplier.toFixed(1)})`,
+        value: `+${estimatedEarnedPoints} điểm`,
+        success: true,
+      },
     ],
     [
       basePrice,
+      estimatedEarnedPoints,
+      pointMultiplier,
       pointsDiscount,
       promoDiscount,
+      voucherDiscount,
       appliedPromo,
       appliedVoucher,
     ]
@@ -238,10 +296,13 @@ export default function PaymentScreen() {
       const response = await api.redeemPreview(accessToken, {
         service_package_id: params.servicePackageId,
         promotion_code: appliedPromo?.promotion.code,
+        voucher_code: appliedVoucher?.code,
         used_points: points,
       });
       const finalPrice = response.data.final_price ?? basePrice;
-      setPointsDiscount(Math.max(0, basePrice - promoDiscount - finalPrice));
+      const discountFromBe =
+        basePrice - promoDiscount - voucherDiscount - finalPrice;
+      setPointsDiscount(Math.max(0, discountFromBe));
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Không thể áp điểm.";
@@ -455,7 +516,7 @@ export default function PaymentScreen() {
           applied={appliedPromo}
           appliedVoucher={appliedVoucher}
           onAppliedChange={handleAppliedChange}
-          onVoucherChange={setAppliedVoucher}
+          onVoucherChange={handleVoucherChange}
           onError={(msg) => Alert.alert("Mã khuyến mãi", msg)}
           onValidate={handleValidatePromo}
           onValidateVoucher={handleValidateVoucher}
@@ -509,24 +570,24 @@ export default function PaymentScreen() {
         ) : null}
 
         <View className="px-4 pb-4">
-          <TouchableOpacity
-            disabled={submitting || loading}
+          <LoadingButton
+            title={
+              selectedPayment === "payos"
+                ? "Xác nhận và thanh toán PayOS"
+                : "Xác nhận đặt lịch"
+            }
+            disabled={loading}
             onPress={handleConfirmBooking}
-            className="w-full bg-primary py-4 rounded-xl flex-row items-center justify-center gap-2"
-          >
-            {submitting || loading ? (
-              <ActivityIndicator color="#ffffff" />
-            ) : (
-              <>
-                <Text className="text-white text-base font-semibold">
-                  {selectedPayment === "payos"
-                    ? "Xác nhận và thanh toán PayOS"
-                    : "Xác nhận đặt lịch"}
-                </Text>
-                <ArrowRight size={18} color="#ffffff" strokeWidth={2.7} />
-              </>
-            )}
-          </TouchableOpacity>
+            loading={submitting}
+            loadingTitle={
+              selectedPayment === "payos"
+                ? "Đang mở PayOS..."
+                : "Đang tạo lịch hẹn..."
+            }
+            icon={ArrowRight}
+            iconPosition="right"
+            variant="primary"
+          />
         </View>
       </ScrollView>
     </SafeAreaView>

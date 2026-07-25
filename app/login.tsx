@@ -22,7 +22,6 @@ const CAR_WASH_1 =
   "https://storage.googleapis.com/banani-generated-images/generated-images/7a0e8afa-8db2-4d36-8b83-71f9a1fe5428.jpg";
 const CAR_WASH_2 =
   "https://storage.googleapis.com/banani-generated-images/generated-images/6da74e0d-fae2-44e9-809d-c566767ae47d.jpg";
-const GOOGLE_ICON = "https://www.google.com/favicon.ico";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -154,14 +153,12 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
 
-            {/* Divider */}
-            <View className="flex-row items-center gap-3">
+            {/* Google button — tạm ẩn, BE chưa hỗ trợ OAuth */}
+            {/* <View className="flex-row items-center gap-3">
               <View className="flex-1 bg-border" style={{ height: 1 }} />
               <Text className="text-sm text-muted-foreground">hoặc</Text>
               <View className="flex-1 bg-border" style={{ height: 1 }} />
             </View>
-
-            {/* Google button */}
             <TouchableOpacity className="border border-border bg-input rounded-xl py-3 flex-row items-center justify-center gap-3">
               <Image
                 source={{ uri: GOOGLE_ICON }}
@@ -170,7 +167,7 @@ export default function LoginScreen() {
               <Text className="text-base font-medium text-foreground">
                 Tiếp tục với Google
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
 
             {/* Register link */}
             <View className="flex-row items-center justify-center gap-1">

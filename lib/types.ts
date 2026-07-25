@@ -115,6 +115,10 @@ export interface ServicePackage {
   requires_wash_bay?: boolean;
   requires_care_staff?: boolean;
   is_active?: boolean;
+  is_popular?: boolean;
+  image_url?: string | null;
+  display_price?: number | null;
+  discount_percentage?: number | null;
 }
 
 export type PromotionDiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
@@ -393,23 +397,84 @@ export interface NotificationItem {
   related_id?: string;
   in_app_status?: "UNREAD" | "READ" | string;
   read_at?: string | null;
+  unread_count?: number;
+  metadata?: Record<string, unknown> | null;
+  icon?: string | null;
+  action_url?: string | null;
   created_at: string;
+}
+
+export function isUnreadNotification(
+  notification: Pick<NotificationItem, "in_app_status">
+): boolean {
+  return notification.in_app_status !== "READ";
 }
 
 export interface WashHistory {
   id: string;
   booking_id: string;
   amount_paid: number;
+  original_price?: number;
   discount_amount: number;
   points_earned: number;
   points_used: number;
   payment_method?: string;
   paid_at?: string;
+  service_started_at?: string | null;
   service_completed_at?: string;
-  booking?: Pick<Booking, "id" | "start_time" | "status" | "payment_status"> | null;
-  garage?: Garage | null;
-  vehicle?: Vehicle | null;
-  service_package?: ServicePackage | null;
+  created_at?: string;
+  vehicle_type?: VehicleType;
+  booking?: {
+    id: string;
+    booking_date?: string | null;
+    start_time?: string | null;
+    end_time?: string | null;
+    status?: string;
+    payment_status?: string;
+  } | null;
+  garage?: {
+    id: string;
+    name: string;
+    garage_code?: string;
+    address?: string;
+    city?: string | null;
+    is_active?: boolean;
+  } | null;
+  vehicle?: {
+    id: string;
+    raw_license_plate: string;
+    normalized_license_plate?: string;
+    vehicle_type: VehicleType;
+    engine_type: EngineType;
+    brand?: string | null;
+    model?: string | null;
+    color?: string | null;
+    is_active?: boolean;
+  } | null;
+  wash_bay?: {
+    id: string;
+    name: string;
+    bay_code?: string;
+    vehicle_type?: VehicleType;
+    status?: string;
+    is_active?: boolean;
+  } | null;
+  service_package?: {
+    id: string;
+    name: string;
+    vehicle_type: VehicleType;
+    service_type?: string;
+    base_price?: number;
+    duration_minutes?: number;
+    requires_wash_bay?: boolean;
+    is_active?: boolean;
+  } | null;
+}
+
+export interface WashHistoryClaimResult {
+  matched_count?: number;
+  claimed_count?: number;
+  [key: string]: unknown;
 }
 
 export interface Waitlist {
@@ -421,7 +486,13 @@ export interface Waitlist {
   add_on_service_ids?: string[];
   vehicle_type?: VehicleType;
   desired_start_time: string;
-  status: "WAITING" | "OFFERED" | "ACCEPTED" | "CANCELED" | "EXPIRED" | string;
+  status:
+    | "WAITING"
+    | "OFFERED"
+    | "ACCEPTED"
+    | "CANCELED"
+    | "EXPIRED"
+    | string;
   offered_at?: string | null;
   offer_expires_at?: string | null;
   accepted_at?: string | null;
@@ -429,10 +500,53 @@ export interface Waitlist {
   cancel_reason?: string | null;
   expired_at?: string | null;
   created_booking_id?: string | null;
+  source_booking_id?: string | null;
   note?: string | null;
-  garage?: Garage | null;
-  vehicle?: Vehicle | null;
-  service_package?: ServicePackage | null;
+  customer?: {
+    id: string;
+    full_name?: string;
+    email?: string | null;
+    phone?: string | null;
+    role?: string;
+    is_active?: boolean;
+  } | null;
+  vehicle?: {
+    id: string;
+    raw_license_plate: string;
+    normalized_license_plate?: string;
+    vehicle_type: VehicleType;
+    engine_type: EngineType;
+    brand?: string | null;
+    model?: string | null;
+    color?: string | null;
+    is_active?: boolean;
+  } | null;
+  garage?: {
+    id: string;
+    name: string;
+    garage_code?: string;
+    address?: string;
+    city?: string | null;
+    is_active?: boolean;
+  } | null;
+  service_package?: {
+    id: string;
+    name: string;
+    vehicle_type: VehicleType;
+    service_type?: string;
+    base_price?: number;
+    duration_minutes?: number;
+    is_active?: boolean;
+  } | null;
+  created_booking?: {
+    id: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    status?: string;
+    payment_status?: string;
+  } | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface SurveyQuestion {
@@ -451,4 +565,476 @@ export interface Survey {
   status: "DRAFT" | "PUBLISHED" | "CLOSED";
   questions: SurveyQuestion[];
   response_expires_at?: string | null;
+}
+
+export type VoucherKind = "DISCOUNT" | "FREE_SERVICE" | "CASHBACK" | string;
+export type VoucherStatus =
+  | "ACTIVE"
+  | "REDEEMED"
+  | "EXPIRED"
+  | "CANCELED"
+  | string;
+export type VoucherSource =
+  | "ADMIN_GIFT"
+  | "PROMOTION_REWARD"
+  | "LOYALTY_REDEEM"
+  | "COMPENSATION"
+  | string;
+
+export interface CustomerVoucher {
+  id: string;
+  customer_id?: string;
+  code: string;
+  name?: string | null;
+  kind?: VoucherKind | null;
+  discount_type?: "PERCENTAGE" | "FIXED_AMOUNT" | null;
+  discount_value?: number | null;
+  max_discount_amount?: number | null;
+  min_order_amount?: number | null;
+  applicable_service_package_ids?: string[];
+  applicable_vehicle_types?: VehicleType[];
+  source?: VoucherSource | null;
+  status?: VoucherStatus | null;
+  issued_at?: string;
+  expires_at?: string | null;
+  redeemed_at?: string | null;
+  redeemed_booking_id?: string | null;
+  is_active?: boolean;
+  description?: string | null;
+}
+
+export interface FavoriteGarage {
+  garage_id: string;
+  favorited_at?: string;
+  garage?: Garage | null;
+}
+
+export interface GarageReview {
+  id: string;
+  garage_id: string;
+  booking_id?: string | null;
+  customer_id?: string;
+  rating: number;
+  comment?: string | null;
+  created_at: string;
+  customer?: Pick<UserPublic, "id" | "full_name" | "avatar_url"> | null;
+}
+
+export type CustomerCaseType =
+  | "COMPLAINT"
+  | "INCIDENT"
+  | "HANDOVER_ISSUE"
+  | "PAYMENT_ISSUE"
+  | "OTHER"
+  | string;
+
+// BE status thực tế (theo customerCase.constant.js):
+// SUBMITTED → ACKNOWLEDGED → INVESTIGATING → RESOLVED → CLOSED
+export type CustomerCaseStatus =
+  | "SUBMITTED"
+  | "ACKNOWLEDGED"
+  | "INVESTIGATING"
+  | "RESOLVED"
+  | "CLOSED"
+  | string;
+
+export type CustomerCaseCategory =
+  | "VEHICLE_DAMAGE"
+  | "MISSING_PROPERTY"
+  | "SERVICE_QUALITY"
+  | "SERVICE_INCOMPLETE"
+  | "BILLING_PAYMENT"
+  | "STAFF_CONDUCT"
+  | "SAFETY_CONCERN"
+  | "OTHER"
+  | string;
+
+export type CustomerCasePriority = "NORMAL" | "HIGH" | "CRITICAL" | string;
+
+export type CustomerCaseSource = "HANDOVER" | "AFTER_HANDOVER" | string;
+
+export interface CustomerCaseUpload {
+  id: string;
+  url?: string;
+  mime_type?: string;
+  size?: number;
+  purpose?: string;
+  owner_id?: string | null;
+  created_at?: string;
+}
+
+export interface CustomerCase {
+  id: string;
+  case_code?: string;
+  booking_id?: string | null;
+  handover_id?: string | null;
+  garage_id?: string | null;
+  customer_id?: string;
+  customer?: {
+    id: string;
+    full_name?: string;
+    role?: Role;
+  } | null;
+  vehicle_id?: string | null;
+  is_walk_in_case?: boolean;
+  reporter_name?: string | null;
+  reporter_phone?: string | null;
+  created_by_staff_id?: string | null;
+  category: CustomerCaseCategory;
+  priority?: CustomerCasePriority;
+  source?: CustomerCaseSource;
+  status: CustomerCaseStatus;
+  description?: string;
+  damage_location?: string | null;
+  desired_resolution?: string | null;
+  discovered_at?: string | null;
+  vehicle_received?: boolean;
+  evidence?: CustomerCaseUpload[];
+  assigned_to_id?: string | null;
+  assigned_to?: {
+    id: string;
+    full_name?: string;
+    role?: Role;
+  } | null;
+  assigned_by_id?: string | null;
+  assigned_at?: string | null;
+  acknowledged_by_id?: string | null;
+  acknowledged_at?: string | null;
+  first_response_due_at?: string | null;
+  resolution_due_at?: string | null;
+  first_response_breached_at?: string | null;
+  resolution_breached_at?: string | null;
+  escalation_level?: number;
+  reopen_count?: number;
+  last_reopened_at?: string | null;
+  last_reopen_reason?: string | null;
+  liability_status?:
+    | "UNDETERMINED"
+    | "GARAGE_RESPONSIBLE"
+    | "PRE_EXISTING_DAMAGE"
+    | "CUSTOMER_OR_THIRD_PARTY"
+    | "INCONCLUSIVE"
+    | string;
+  conclusion?: string | null;
+  resolution_summary?: string | null;
+  resolved_by_id?: string | null;
+  resolved_at?: string | null;
+  closed_by_id?: string | null;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at?: string;
+  // Backward-compat field (alias of `category`) cho FE cũ dùng type
+  type?: CustomerCaseCategory | string;
+  subject?: string;
+  attachments?: string[];
+  resolution?: string | null;
+}
+
+export interface GarageWithDistance extends Garage {
+  distance_km?: number | null;
+  rating?: number | null;
+  review_count?: number | null;
+  total_bookings?: number | null;
+  is_favorite?: boolean;
+  photos?: string[];
+  open_hours_text?: string | null;
+}
+
+// ===== Booking Handover =====
+export type BookingHandoverState =
+  | "PENDING"
+  | "READY_FOR_CUSTOMER"
+  | "ON_HOLD"
+  | "RELEASED"
+  | string;
+export type BookingHandoverResponse =
+  | "PENDING"
+  | "ACCEPTED"
+  | "ISSUE_REPORTED"
+  | string;
+export type BookingHandoverResponseSource =
+  | "CUSTOMER_SELF_SERVICE"
+  | "STAFF_ASSISTED"
+  | string;
+
+export interface BookingHandoverInspectionImage {
+  id?: string;
+  type?: "BEFORE_WASH" | "AFTER_WASH" | string;
+  url?: string;
+  thumbnail_url?: string;
+  note?: string | null;
+  uploaded_at?: string;
+}
+
+export interface BookingHandoverInspectionSnapshot {
+  before?: {
+    id: string;
+    type: "BEFORE_WASH" | string;
+    note?: string | null;
+    images: string[];
+    inspected_by_id?: string | null;
+    inspected_at?: string | null;
+  } | null;
+  after?: {
+    id: string;
+    type: "AFTER_WASH" | string;
+    note?: string | null;
+    images: string[];
+    inspected_by_id?: string | null;
+    inspected_at?: string | null;
+  } | null;
+}
+
+export interface BookingHandoverUserSummary {
+  id: string;
+  full_name?: string | null;
+  role?: Role;
+}
+
+export interface BookingHandover {
+  id: string;
+  booking_id: string;
+  garage_id: string;
+  customer_id?: string | null;
+  vehicle_id?: string | null;
+  guest_name?: string | null;
+  guest_phone?: string | null;
+  state: BookingHandoverState;
+  customer_response: BookingHandoverResponse;
+  customer_response_source?: BookingHandoverResponseSource | null;
+  ready_at?: string | null;
+  ready_by_id?: string | null;
+  ready_by?: BookingHandoverUserSummary | null;
+  ready_note?: string | null;
+  customer_responded_at?: string | null;
+  customer_response_recorded_by_id?: string | null;
+  customer_response_recorded_by?: BookingHandoverUserSummary | null;
+  customer_response_note?: string | null;
+  accepted_at?: string | null;
+  released_at?: string | null;
+  released_by_id?: string | null;
+  released_by?: BookingHandoverUserSummary | null;
+  release_note?: string | null;
+  issue_case_ids?: string[];
+  inspection_snapshot?: BookingHandoverInspectionSnapshot | Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ===== Booking Incident =====
+export type BookingIncidentType =
+  | "WASH_BAY_FAILURE"
+  | "STAFF_UNAVAILABLE"
+  | "OTHER_GARAGE_INCIDENT"
+  | string;
+export type BookingIncidentStatus =
+  | "AWAITING_CUSTOMER_DECISION"
+  | "RESOLVED"
+  | "VOIDED"
+  | string;
+export type BookingIncidentDecision =
+  | "REASSIGN_AND_CONTINUE"
+  | "RESCHEDULE_NEAREST"
+  | "RESCHEDULE_CUSTOM"
+  | "CANCEL_BY_GARAGE"
+  | string;
+export type BookingIncidentContinuationPolicy =
+  | "RESUME_REMAINING"
+  | "RESTART_CURRENT_ITEM"
+  | string;
+
+export interface BookingIncident {
+  id: string;
+  booking_id: string;
+  garage_id?: string | null;
+  customer_id?: string | null;
+  incident_type: BookingIncidentType;
+  description?: string | null;
+  status: BookingIncidentStatus;
+  affected_booking_item_key?: string | null;
+  affected_wash_bay_id?: string | null;
+  affected_staff_profile_id?: string | null;
+  reported_by_id?: string | null;
+  reported_by?: BookingHandoverUserSummary | null;
+  reported_booking_status?: BookingStatus;
+  reported_schedule_snapshot?: Record<string, unknown>;
+  countdown_paused_automatically?: boolean;
+  decision?: BookingIncidentDecision | null;
+  decision_source?: "CUSTOMER" | "STAFF_RECORDED" | string;
+  contact_channel?: "APP" | "PHONE" | "IN_PERSON" | string;
+  customer_note?: string | null;
+  new_start_time?: string | null;
+  continuation_policy?: BookingIncidentContinuationPolicy | null;
+  customer_confirmed_at?: string | null;
+  decision_recorded_by_id?: string | null;
+  decision_recorded_by?: BookingHandoverUserSummary | null;
+  resolved_at?: string | null;
+  resolved_by_id?: string | null;
+  resolved_by?: BookingHandoverUserSummary | null;
+  compensation_voucher_ids?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface IncidentResolutionDay {
+  date: string;
+  suggested_slots: Array<{
+    start_time: string;
+    end_time: string;
+    is_available?: boolean;
+  }>;
+  has_available_slots?: boolean;
+  reason?: string | null;
+}
+
+export interface IncidentResolutionOptions {
+  booking_id: string;
+  incident_id: string;
+  incident_type: BookingIncidentType;
+  operation_status?: BookingOperationStatus;
+  can_reassign_and_continue?: boolean;
+  available_actions: BookingIncidentDecision[];
+  search_start_time?: string;
+  days?: IncidentResolutionDay[];
+  suggested_slots?: Array<{
+    start_time: string;
+    end_time: string;
+    is_available?: boolean;
+  }>;
+}
+
+export interface BookingIncidentActiveResponse {
+  incident: BookingIncident | null;
+  resolution_options: IncidentResolutionOptions | null;
+}
+
+// ===== Customer Case extended =====
+export type CustomerCaseLiabilityStatus =
+  | "UNDETERMINED"
+  | "GARAGE_AT_FAULT"
+  | "CUSTOMER_AT_FAULT"
+  | "SHARED"
+  | "NO_LIABILITY"
+  | string;
+
+export interface CustomerCaseMessage {
+  id: string;
+  case_id: string;
+  sender_id?: string | null;
+  sender?: {
+    id: string;
+    full_name?: string;
+    role?: Role;
+  } | null;
+  sender_role: "CUSTOMER" | "STAFF" | "ADMIN" | string;
+  message: string;
+  evidence?: CustomerCaseUpload[];
+  created_at: string;
+}
+
+export interface CustomerCaseEvent {
+  id: string;
+  case_id: string;
+  event_type: string;
+  actor_id?: string | null;
+  actor?: {
+    id: string;
+    full_name?: string;
+    role?: Role;
+  } | null;
+  actor_role?: string;
+  from_status?: string;
+  to_status?: string;
+  visible_to_customer?: boolean;
+  metadata?: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface CustomerCaseTechnicalAssessment {
+  id: string;
+  case_id: string;
+  garage_id: string;
+  status: "ASSIGNED" | "IN_PROGRESS" | "SUBMITTED" | string;
+  findings?: string;
+  root_cause?: string;
+  severity?: "MINOR" | "MODERATE" | "MAJOR" | "SAFETY_CRITICAL" | string;
+  recommended_resolution?: string;
+  evidence?: CustomerCaseUpload[];
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CustomerCaseResolutionAction {
+  id?: string;
+  action_type:
+    | "REFUND"
+    | "VOUCHER"
+    | "REWORK"
+    | "WAIVE_CHARGE"
+    | "NO_COMPENSATION"
+    | string;
+  amount?: number | null;
+  refund_method?: "ORIGINAL_PAYMENT" | "CASH" | "BANK_TRANSFER" | string;
+  voucher_type?: string;
+  value?: number;
+  max_discount_amount?: number;
+  min_order_amount?: number;
+  service_package_id?: string | null;
+  expires_at?: string;
+  rework_start_time?: string;
+  voucher_id?: string;
+  note?: string;
+}
+
+export interface CustomerCaseResolution {
+  id: string;
+  case_id: string;
+  version: number;
+  summary: string;
+  actions: CustomerCaseResolutionAction[];
+  status:
+    | "PROPOSED"
+    | "CUSTOMER_ACCEPTED"
+    | "CUSTOMER_REJECTED"
+    | "APPLIED"
+    | "FAILED"
+    | "SUPERSEDED"
+    | string;
+  proposed_by_id?: string | null;
+  proposed_at?: string;
+  customer_responded_by_id?: string | null;
+  customer_responded_at?: string | null;
+  customer_response_note?: string | null;
+  applied_at?: string | null;
+  applied_by_id?: string | null;
+  refund_ids?: string[];
+  voucher_ids?: string[];
+  rework_booking_ids?: string[];
+}
+
+export interface CustomerCaseRefund {
+  id: string;
+  case_id: string;
+  resolution_id?: string | null;
+  booking_id?: string | null;
+  amount: number;
+  currency?: string;
+  method: "ORIGINAL_PAYMENT" | "CASH" | "BANK_TRANSFER" | string;
+  status: "PROCESSING" | "COMPLETED" | "FAILED" | string;
+  transaction_reference?: string | null;
+  failure_reason?: string | null;
+  note?: string | null;
+  approved_by_id?: string | null;
+  processed_by_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CustomerCaseDetailResponse {
+  case: CustomerCase;
+  messages: CustomerCaseMessage[];
+  timeline: CustomerCaseEvent[];
+  technical_assessment: CustomerCaseTechnicalAssessment | null;
+  resolutions: CustomerCaseResolution[];
+  refunds: CustomerCaseRefund[];
 }
