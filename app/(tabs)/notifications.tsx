@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   RefreshControl,
@@ -8,51 +8,39 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { ArrowLeft, Bell, Check, Trash2 } from "lucide-react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import { Bell, Check, Trash2 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import { resolveDeepLink } from "@/lib/deepLinks";
 import type { NotificationItem } from "@/lib/types";
 import { isUnreadNotification } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
+import { useNotifications } from "@/providers/NotificationsProvider";
 
-export default function NotificationsScreen() {
+export default function NotificationsTab() {
   const router = useRouter();
   const { accessToken, isAuthenticated } = useApp();
+  const { unreadCount, refresh, markLocalRead, clearLocal } = useNotifications();
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const unreadCount = useMemo(
-    () => notifications.filter(isUnreadNotification).length,
-    [notifications]
-  );
-
   const resolveTarget = (
     item: NotificationItem
   ): { pathname: string; params?: Record<string, string> } | null => {
-    const type = (item.related_type ?? item.type ?? "").toUpperCase();
-    const id = item.related_id;
-    if (!id) return null;
-
-    if (type.includes("WAITLIST")) {
-      return { pathname: "/waitlist/[id]", params: { id } };
-    }
-    if (type.includes("CASE") || type.includes("ISSUE")) {
-      return { pathname: "/support/cases/[id]", params: { id } };
-    }
-    if (type.includes("BOOKING")) {
-      return { pathname: "/booking-detail", params: { id } };
-    }
-    if (type.includes("VEHICLE")) {
-      return { pathname: "/my-vehicles" };
-    }
-    return null;
+    return resolveDeepLink({
+      related_type: item.related_type ?? undefined,
+      related_id: item.related_id ?? undefined,
+      notification_id: item.id,
+      type: item.type,
+    });
   };
 
   const handleOpenNotification = async (item: NotificationItem) => {
     if (isUnreadNotification(item)) {
+      markLocalRead();
       try {
         await api.markNotificationRead(accessToken!, item.id);
       } catch (error) {
@@ -72,12 +60,11 @@ export default function NotificationsScreen() {
     }
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!isAuthenticated || !accessToken) {
       setLoading(false);
       return;
     }
-
     try {
       const response = await api.getNotifications(accessToken);
       setNotifications(response.data ?? []);
@@ -89,11 +76,20 @@ export default function NotificationsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [accessToken, isAuthenticated]);
 
   useEffect(() => {
     void loadData();
-  }, [accessToken, isAuthenticated]);
+  }, [loadData]);
+
+  // Re-fetch each time the tab regains focus (covers deep-link back, swipe back)
+  useFocusEffect(
+    useCallback(() => {
+      void loadData();
+      void refresh();
+      clearLocal();
+    }, [loadData, refresh, clearLocal])
+  );
 
   if (!isAuthenticated) {
     return (
@@ -120,36 +116,27 @@ export default function NotificationsScreen() {
     );
   }
 
-  const handleBack = () => {
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace("/(tabs)/profile");
-  };
-
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <View className="px-4 pt-5 pb-3 flex-row items-center justify-between">
-        <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={handleBack}>
-            <ArrowLeft size={22} color="#1a1a1a" strokeWidth={2.2} />
-          </TouchableOpacity>
-          <View>
-            <Text className="text-lg font-bold text-primary">Thông báo</Text>
-            {unreadCount > 0 ? (
-              <Text className="text-xs text-muted-foreground mt-0.5">
-                {unreadCount} thông báo chưa đọc
-              </Text>
-            ) : null}
-          </View>
+        <View>
+          <Text className="text-lg font-bold text-primary">Thông báo</Text>
+          {unreadCount > 0 ? (
+            <Text className="text-xs text-muted-foreground mt-0.5">
+              {unreadCount} thông báo chưa đọc
+            </Text>
+          ) : (
+            <Text className="text-xs text-muted-foreground mt-0.5">
+              Bạn đã xem hết thông báo
+            </Text>
+          )}
         </View>
         {unreadCount > 0 ? (
           <TouchableOpacity
             onPress={async () => {
               try {
                 await api.markAllNotificationsRead(accessToken!);
+                clearLocal();
                 await loadData();
               } catch (error) {
                 const message =
@@ -177,6 +164,7 @@ export default function NotificationsScreen() {
             onRefresh={() => {
               setRefreshing(true);
               void loadData();
+              void refresh();
             }}
           />
         }
@@ -187,6 +175,10 @@ export default function NotificationsScreen() {
               <Bell size={22} color="#1a5fd4" strokeWidth={2.2} />
               <Text className="text-base font-semibold text-foreground mt-3">
                 Chưa có thông báo
+              </Text>
+              <Text className="text-xs text-muted-foreground text-center mt-2 leading-5">
+                Các cập nhật về booking, thanh toán và điểm thưởng sẽ xuất hiện
+                tại đây.
               </Text>
             </View>
           ) : (

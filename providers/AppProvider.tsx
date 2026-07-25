@@ -8,6 +8,10 @@ import {
   useState,
 } from "react";
 import { api } from "@/lib/api";
+import {
+  clearPushToken,
+  getOrCreateExpoPushToken,
+} from "@/lib/pushNotifications";
 import type {
   PhoneVerificationChallenge,
   PhoneVerificationToken,
@@ -120,6 +124,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               setProfile(response.data);
               if (response.data) setAuthUser(response.data);
             }
+            // Re-register push notifications for this authenticated session
+            void getOrCreateExpoPushToken();
           } catch {
             // Token invalid / expired — clear storage silently
             if (!cancelled) {
@@ -176,6 +182,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // profile fetch failure should not block login
       }
+      // Register for push notifications after successful login
+      void getOrCreateExpoPushToken();
     } finally {
       setAuthBusy(false);
     }
@@ -193,6 +201,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     } finally {
       await AsyncStorage.multiRemove([TOKEN_STORAGE_KEY, USER_STORAGE_KEY]);
+      await clearPushToken();
       setAccessToken(null);
       setAuthUser(null);
       setProfile(null);
