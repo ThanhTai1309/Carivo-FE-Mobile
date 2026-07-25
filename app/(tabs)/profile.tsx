@@ -20,6 +20,7 @@ import {
   CircleHelp,
   CircleUserRound,
   History,
+  Hourglass,
   Info,
   KeyRound,
   LogOut,
@@ -66,6 +67,7 @@ export default function ProfileScreen() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [histories, setHistories] = useState<WashHistory[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [openCases, setOpenCases] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [avatarBusy, setAvatarBusy] = useState(false);
@@ -88,6 +90,14 @@ export default function ProfileScreen() {
       setBookings(bookingsResponse.data ?? []);
       setHistories(historiesResponse.data ?? []);
       setNotifications(notificationsResponse.data ?? []);
+
+      api
+        .getMyCustomerCases(accessToken, {
+          status: "SUBMITTED",
+          limit: 100,
+        })
+        .then((res) => setOpenCases(res.data?.length ?? 0))
+        .catch(() => undefined);
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Không thể tải hồ sơ.";
@@ -213,38 +223,49 @@ export default function ProfileScreen() {
           value: `${bookings.length ? "Xem tất cả" : "Chưa có"}`,
           onPress: () => router.push("/my-vehicles"),
         },
-      ],
-    },
-    {
-      title: "Hoạt động",
-      items: [
-        {
-          icon: CalendarClock,
-          label: "Lịch sử đặt lịch",
-          value: `${bookings.length}`,
-          onPress: () => router.push("/(tabs)/booking-history"),
-        },
-        {
-          icon: Bell,
-          label: "Thông báo",
-          value: unreadCount > 0 ? `${unreadCount} mới` : "Đã xem",
-          onPress: () => router.push("/notifications"),
-        },
         {
           icon: History,
-          label: "Lịch sử rửa xe",
-          value: `${histories.length}`,
-          onPress: () => router.push("/(tabs)/profile"),
+          label: "Ví voucher",
+          onPress: () => router.push("/vouchers"),
         },
       ],
     },
+  {
+    title: "Hoạt động",
+    items: [
+      {
+        icon: CalendarClock,
+        label: "Lịch sử đặt lịch",
+        value: `${bookings.length}`,
+        onPress: () => router.push("/(tabs)/booking-history"),
+      },
+      {
+        icon: Bell,
+        label: "Thông báo",
+        value: unreadCount > 0 ? `${unreadCount} mới` : "Đã xem",
+        onPress: () => router.push("/notifications"),
+      },
+      {
+        icon: History,
+        label: "Lịch sử rửa xe",
+        value: `${histories.length}`,
+        onPress: () => router.push("/history"),
+      },
+      {
+        icon: Hourglass,
+        label: "Danh sách chờ slot",
+        onPress: () => router.push("/waitlist"),
+      },
+    ],
+  },
     {
       title: "Hỗ trợ",
       items: [
         {
           icon: CircleHelp,
-          label: "Trợ giúp & Liên hệ",
-          onPress: () => router.push("/help"),
+          label: "Trợ giúp & Khiếu nại",
+          value: openCases > 0 ? `${openCases} đang mở` : undefined,
+          onPress: () => router.push("/support"),
         },
         {
           icon: Info,
@@ -584,25 +605,55 @@ export default function ProfileScreen() {
           ) : null}
 
           {/* Recent wash history */}
-          {histories.length > 0 ? (
-            <View>
-              <Text className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-2 ml-2">
+          <View>
+            <View className="flex-row items-center justify-between mb-2 ml-2">
+              <Text className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
                 Lịch sử rửa xe
               </Text>
-              <View
-                className="rounded-2xl bg-card overflow-hidden"
-                style={{
-                  shadowColor: "#0f172a",
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowOpacity: 0.05,
-                  shadowRadius: 8,
-                  elevation: 2,
-                }}
-              >
-                {histories.slice(0, 3).map((history, index) => (
-                  <View
+              <TouchableOpacity onPress={() => router.push("/history")}>
+                <Text className="text-[11px] font-semibold text-primary">
+                  Xem tất cả
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <View
+              className="rounded-2xl bg-card overflow-hidden"
+              style={{
+                shadowColor: "#0f172a",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+                elevation: 2,
+              }}
+            >
+              {histories.length === 0 ? (
+                <View className="px-4 py-4 flex-row items-center gap-3">
+                  <View className="w-10 h-10 rounded-xl bg-secondary items-center justify-center">
+                    <History size={18} color="#1a5fd4" strokeWidth={2.2} />
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => router.push("/history")}
+                    className="flex-1"
+                  >
+                    <Text className="text-sm font-semibold text-foreground">
+                      Chưa có lần rửa nào
+                    </Text>
+                    <Text className="text-[11px] text-muted-foreground mt-0.5">
+                      Sau dịch vụ đầu tiên, lịch sử sẽ hiển thị ở đây.
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                histories.slice(0, 3).map((history, index) => (
+                  <TouchableOpacity
                     key={history.id}
-                    className={`flex-row items-center gap-3 px-4 py-3 ${
+                    onPress={() =>
+                      router.push({
+                        pathname: "/history/[id]",
+                        params: { id: history.id },
+                      })
+                    }
+                    className={`flex-row items-center gap-3 px-4 py-3 active:opacity-80 ${
                       index < Math.min(histories.length, 3) - 1
                         ? "border-b border-border"
                         : ""
@@ -623,11 +674,16 @@ export default function ProfileScreen() {
                         {formatCurrency(history.amount_paid)}
                       </Text>
                     </View>
-                  </View>
-                ))}
-              </View>
+                    <ChevronRight
+                      size={16}
+                      color="#94a3b8"
+                      strokeWidth={2.2}
+                    />
+                  </TouchableOpacity>
+                ))
+              )}
             </View>
-          ) : null}
+          </View>
         </View>
       </ScrollView>
     </SafeAreaView>

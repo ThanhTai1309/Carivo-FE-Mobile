@@ -1,6 +1,7 @@
 import { Tabs } from "expo-router";
-import { Home, Star, CalendarDays, History, User } from "lucide-react-native";
-import { View } from "react-native";
+import { Home, Star, CalendarDays, History, User, Bell } from "lucide-react-native";
+import { Text, View } from "react-native";
+import { useNotifications } from "@/providers/NotificationsProvider";
 
 const COLORS = {
   primary: "#1a5fd4",
@@ -24,6 +25,25 @@ function TabIcon({
         color={focused ? COLORS.primary : COLORS.mutedForeground}
         strokeWidth={2.2}
       />
+    </View>
+  );
+}
+
+function BellIcon({ focused }: { focused: boolean }) {
+  const { unreadCount } = useNotifications();
+  const showBadge = unreadCount > 0;
+  const display = unreadCount > 9 ? "9+" : String(unreadCount);
+
+  return (
+    <View className="relative">
+      <TabIcon icon={Bell} focused={focused} />
+      {showBadge ? (
+        <View className="absolute -top-0.5 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-500 items-center justify-center">
+          <Text className="text-white text-[10px] font-bold leading-none">
+            {display}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -71,6 +91,13 @@ export default function TabsLayout() {
           tabBarIcon: ({ focused }) => (
             <TabIcon icon={CalendarDays} focused={focused} />
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          title: "Thông báo",
+          tabBarIcon: ({ focused }) => <BellIcon focused={focused} />,
         }}
       />
       <Tabs.Screen

@@ -150,6 +150,7 @@ export default function HomeScreen() {
         <HomeHeader
           userName={userName}
           avatarUrl={profile?.avatar_url ?? authUser?.avatar_url ?? undefined}
+          accessToken={accessToken}
           onNotificationPress={() =>
             router.push(isAuthenticated ? "/notifications" : "/login")
           }

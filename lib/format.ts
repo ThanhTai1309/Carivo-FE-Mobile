@@ -1,10 +1,64 @@
-export function formatCurrency(value?: number | null) {
-  const amount = typeof value === "number" && Number.isFinite(value) ? value : 0;
+export function formatCurrency(
+  value?: number | null | string,
+  options: { compact?: boolean; showSymbol?: boolean } = {}
+) {
+  const { compact = false, showSymbol = true } = options;
+  const raw = typeof value === "number" ? value : Number(value ?? 0);
+  const amount =
+    typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+
+  if (compact && Math.abs(amount) >= 1_000_000) {
+    const millions = amount / 1_000_000;
+    const formatted = millions.toLocaleString("vi-VN", {
+      maximumFractionDigits: 1,
+    });
+    return showSymbol ? `${formatted}tr` : formatted;
+  }
+  if (compact && Math.abs(amount) >= 1_000) {
+    const thousands = amount / 1_000;
+    const formatted = thousands.toLocaleString("vi-VN", {
+      maximumFractionDigits: 0,
+    });
+    return showSymbol ? `${formatted}k` : formatted;
+  }
+
   return new Intl.NumberFormat("vi-VN", {
-    style: "currency",
+    style: showSymbol ? "currency" : "decimal",
     currency: "VND",
     maximumFractionDigits: 0,
   }).format(amount);
+}
+
+export function formatTimeRange(startIso?: string, endIso?: string) {
+  if (!startIso) return "";
+  const start = new Date(startIso);
+  const end = endIso ? new Date(endIso) : null;
+
+  const startText = start.toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  if (!end || Number.isNaN(end.getTime())) {
+    return startText;
+  }
+
+  const endText = end.toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return `${startText} - ${endText}`;
+}
+
+export function formatDuration(minutes?: number | null) {
+  if (!minutes || !Number.isFinite(minutes)) return "";
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return `${hours}h ${mins}p`;
+  if (hours) return `${hours}h`;
+  return `${mins}p`;
 }
 
 export function formatDateLabel(isoDate: string) {
@@ -49,6 +103,18 @@ export function addDays(date: Date, days: number) {
 export function minutesUntil(isoDate: string) {
   const delta = new Date(isoDate).getTime() - Date.now();
   return Math.max(0, Math.round(delta / 60000));
+}
+
+export function formatRemaining(isoDate: string | null | undefined) {
+  if (!isoDate) return "";
+  const delta = new Date(isoDate).getTime() - Date.now();
+  const totalSec = Math.max(0, Math.round(delta / 1000));
+  const hours = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  const secs = totalSec % 60;
+  if (hours > 0) return `${hours}h ${mins}p`;
+  if (mins > 0) return `${mins}p ${secs}s`;
+  return `${secs}s`;
 }
 
 export function formatLicensePlate(plate: string) {

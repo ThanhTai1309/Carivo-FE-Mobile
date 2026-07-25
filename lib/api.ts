@@ -3,21 +3,35 @@ import type {
   AuthTokenPayload,
   AvailableSlotsPayload,
   Booking,
+  BookingHandover,
+  BookingIncident,
+  BookingIncidentActiveResponse,
   BookingInspection,
+  CustomerCase,
+  CustomerCaseDetailResponse,
+  CustomerCaseStatus,
+  CustomerPaymentResponse,
+  CustomerVoucher,
+  FavoriteGarage,
   Garage,
+  GarageReview,
   LoyaltySummary,
   LoyaltyTierRule,
   LoyaltyTransaction,
   NotificationItem,
+  PaymentTransaction,
   PhoneVerificationChallenge,
   PhoneVerificationToken,
   Promotion,
   ServicePackage,
   Survey,
+  SurveyQuestion,
   UserPublic,
   Vehicle,
+  VoucherStatus,
   Waitlist,
   WashHistory,
+  WashHistoryClaimResult,
 } from "@/lib/types";
 
 const API_ROOT = "https://wdp301-project-backend.onrender.com/api/v1";
@@ -119,12 +133,15 @@ function getPayloadMessage(payload: unknown) {
 }
 
 export const api = {
-  requestPhoneVerification(phone: string) {
+  requestPhoneVerification(
+    phone: string,
+    purpose: "REGISTER" | "CHANGE_PHONE" = "REGISTER"
+  ) {
     return request<ApiEnvelope<PhoneVerificationChallenge>>(
       "/auth/phone-verifications/request",
       {
         method: "POST",
-        body: { phone, purpose: "REGISTER" },
+        body: { phone, purpose },
       }
     );
   },
@@ -343,6 +360,7 @@ export const api = {
       add_on_service_ids?: string[];
       start_time: string;
       promotion_code?: string;
+      voucher_code?: string;
       used_points?: number;
       note?: string;
     }
@@ -359,28 +377,6 @@ export const api = {
       method: "PATCH",
       token,
       body: reason ? { reason } : {},
-    });
-  },
-
-  getWaitlists(token: string) {
-    return request<ApiEnvelope<Waitlist[]>>("/waitlists", { token });
-  },
-
-  createWaitlist(
-    token: string,
-    body: {
-      garage_id: string;
-      vehicle_id: string;
-      service_package_id: string;
-      add_on_service_ids?: string[];
-      desired_start_time: string;
-      note?: string;
-    }
-  ) {
-    return request<ApiEnvelope<unknown>>("/waitlists", {
-      method: "POST",
-      token,
-      body,
     });
   },
 
@@ -407,6 +403,7 @@ export const api = {
       service_package_id: string;
       promotion_id?: string;
       promotion_code?: string;
+      voucher_code?: string;
       used_points: number;
     }
   ) {
@@ -416,6 +413,7 @@ export const api = {
         discount_amount?: number;
         final_price?: number;
         points_value?: number;
+        points_discount?: number;
       }>
     >("/loyalty/redeem-preview", {
       method: "POST",
@@ -492,10 +490,32 @@ export const api = {
     return request<ApiEnvelope<Booking>>(`/bookings/${id}`, { token });
   },
 
-  getBookingInspections(token: string, bookingId: string) {
-    return request<ApiEnvelope<BookingInspection[]>>(
-      `/bookings/${bookingId}/inspections`,
+  createPayosPayment(token: string, bookingId: string) {
+    return request<ApiEnvelope<CustomerPaymentResponse>>(
+      `/payments/bookings/${bookingId}/payos`,
+      {
+        method: "POST",
+        token,
+        body: {},
+      }
+    );
+  },
+
+  getPayosPayment(token: string, bookingId: string) {
+    return request<ApiEnvelope<CustomerPaymentResponse>>(
+      `/payments/bookings/${bookingId}/payos`,
       { token }
+    );
+  },
+
+  cancelPayosPayment(token: string, paymentId: string, reason?: string) {
+    return request<ApiEnvelope<{ payment: PaymentTransaction }>>(
+      `/admin/payments/${paymentId}/cancel`,
+      {
+        method: "PATCH",
+        token,
+        body: reason ? { reason } : {},
+      }
     );
   },
 
@@ -507,46 +527,8 @@ export const api = {
     return request<ApiEnvelope<Promotion>>(`/promotions/${id}`);
   },
 
-  getWaitlist(token: string, id: string) {
-    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}`, { token });
-  },
-
-  acceptWaitlist(token: string, id: string) {
-    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}/accept`, {
-      method: "PATCH",
-      token,
-    });
-  },
-
-  cancelWaitlist(token: string, id: string) {
-    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}/cancel`, {
-      method: "PATCH",
-      token,
-    });
-  },
-
   getWashHistory(token: string, id: string) {
     return request<ApiEnvelope<WashHistory>>(`/wash-histories/${id}`, { token });
-  },
-
-  claimWashHistory(token: string, body: { booking_id: string }) {
-    return request<ApiEnvelope<WashHistory>>("/wash-histories/claim", {
-      method: "POST",
-      token,
-      body,
-    });
-  },
-
-  submitSurveyResponse(
-    token: string,
-    surveyId: string,
-    body: { booking_id: string; answers: { question_id: string; value: unknown }[] }
-  ) {
-    return request<ApiEnvelope<unknown>>(`/surveys/${surveyId}/responses`, {
-      method: "POST",
-      token,
-      body,
-    });
   },
 
   uploadFile(token: string, formData: FormData) {
@@ -563,5 +545,326 @@ export const api = {
       method: "DELETE",
       token,
     });
+  },
+
+  // ===== Customer Vouchers =====
+  getMyVouchers(
+    token: string,
+    query?: Record<string, QueryValue> & { status?: VoucherStatus }
+  ) {
+    return request<ApiEnvelope<CustomerVoucher[]>>("/customer-vouchers/my", {
+      token,
+      query,
+    });
+  },
+
+  validateVoucher(
+    token: string,
+    voucherCode: string,
+    servicePackageId: string
+  ) {
+    return request<
+      ApiEnvelope<{
+        voucher: CustomerVoucher;
+        discount_amount: number;
+        final_price: number;
+      }>
+    >("/customer-vouchers/validate", {
+      method: "POST",
+      token,
+      body: {
+        voucher_code: voucherCode,
+        service_package_id: servicePackageId,
+      },
+    });
+  },
+
+  // ===== Garage Favorites =====
+  getFavoriteGarages(token: string) {
+    return request<ApiEnvelope<FavoriteGarage[]>>("/garages/favorites", {
+      token,
+    });
+  },
+
+  toggleGarageFavorite(token: string, garageId: string) {
+    return request<ApiEnvelope<{ favorited: boolean }>>(
+      `/garages/${garageId}/favorite`,
+      {
+        method: "POST",
+        token,
+        body: {},
+      }
+    );
+  },
+
+  // ===== Garage Reviews =====
+  getGarageReviews(garageId: string, query?: Record<string, QueryValue>) {
+    return request<ApiEnvelope<GarageReview[]>>(
+      `/garages/${garageId}/reviews`,
+      { query }
+    );
+  },
+
+  createGarageReview(
+    token: string,
+    garageId: string,
+    body: { booking_id: string; rating: number; comment?: string }
+  ) {
+    return request<ApiEnvelope<GarageReview>>(
+      `/garages/${garageId}/reviews`,
+      {
+        method: "POST",
+        token,
+        body,
+      }
+    );
+  },
+
+  // ===== Customer Cases =====
+  getMyCustomerCases(
+    token: string,
+    query?: Record<string, QueryValue> & {
+      status?: CustomerCaseStatus;
+      category?: string;
+      booking_id?: string;
+      case_code?: string;
+    }
+  ) {
+    return request<ApiEnvelope<CustomerCase[]>>("/customer-cases", {
+      token,
+      query,
+    });
+  },
+
+  getCustomerCaseDetail(token: string, id: string) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/customer-cases/${id}`,
+      { token }
+    );
+  },
+
+  // ===== Survey responses =====
+  submitSurveyResponse(
+    token: string,
+    surveyId: string,
+    body: { booking_id: string; answers: { question_id: string; value: unknown }[] }
+  ) {
+    return request<ApiEnvelope<unknown>>(`/surveys/${surveyId}/responses`, {
+      method: "POST",
+      token,
+      body,
+    });
+  },
+
+  // ===== Waitlist (customer) =====
+  getWaitlists(
+    token: string,
+    query?: Record<string, QueryValue> & {
+      status?: "WAITING" | "OFFERED" | "ACCEPTED" | "CANCELED" | "EXPIRED";
+    }
+  ) {
+    return request<ApiEnvelope<Waitlist[]>>("/waitlists", { token, query });
+  },
+
+  getWaitlist(token: string, id: string) {
+    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}`, { token });
+  },
+
+  createWaitlist(
+    token: string,
+    body: {
+      garage_id: string;
+      vehicle_id: string;
+      service_package_id: string;
+      add_on_service_ids?: string[];
+      desired_start_time: string;
+      note?: string;
+    }
+  ) {
+    return request<ApiEnvelope<Waitlist>>("/waitlists", {
+      method: "POST",
+      token,
+      body,
+    });
+  },
+
+  acceptWaitlist(token: string, id: string) {
+    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}/accept`, {
+      method: "PATCH",
+      token,
+      body: {},
+    });
+  },
+
+  cancelWaitlist(token: string, id: string, reason?: string) {
+    return request<ApiEnvelope<Waitlist>>(`/waitlists/${id}/cancel`, {
+      method: "PATCH",
+      token,
+      body: reason ? { reason } : {},
+    });
+  },
+
+  // ===== Booking inspections =====
+  getBookingInspections(token: string, bookingId: string) {
+    return request<ApiEnvelope<BookingInspection[]>>(
+      `/bookings/${bookingId}/inspections`,
+      { token }
+    );
+  },
+
+  // ===== Wash history =====
+  claimWashHistory(token: string) {
+    return request<ApiEnvelope<WashHistoryClaimResult>>(
+      "/wash-histories/claim",
+      {
+        method: "POST",
+        token,
+        body: {},
+      }
+    );
+  },
+
+  // ===== Garages (search/nearby) =====
+  getNearbyGarages(query?: Record<string, QueryValue>) {
+    return request<ApiEnvelope<Garage[]>>("/garages/nearby", { query });
+  },
+
+  // ===== Service package add-ons =====
+  getAddOnServices(query?: Record<string, QueryValue>) {
+    return request<ApiEnvelope<ServicePackage[]>>("/service-packages", {
+      query: { ...query, service_type: "ADDON" },
+    });
+  },
+
+  // ===== Booking Handover (customer) =====
+  getMyHandover(token: string, bookingId: string) {
+    return request<ApiEnvelope<BookingHandover>>(
+      `/bookings/${bookingId}/handover`,
+      { token }
+    );
+  },
+
+  acceptMyHandover(token: string, bookingId: string, note?: string) {
+    return request<ApiEnvelope<BookingHandover>>(
+      `/bookings/${bookingId}/handover/accept`,
+      {
+        method: "POST",
+        token,
+        body: note ? { note } : {},
+      }
+    );
+  },
+
+  reportHandoverIssue(
+    token: string,
+    bookingId: string,
+    body: {
+      category: string;
+      description: string;
+      damage_location?: string;
+      desired_resolution?: string;
+      discovered_at?: string;
+      vehicle_received?: boolean;
+      upload_ids?: string[];
+    }
+  ) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/bookings/${bookingId}/handover/report`,
+      {
+        method: "POST",
+        token,
+        body,
+      }
+    );
+  },
+
+  // ===== Booking Incident (customer) =====
+  getMyActiveBookingIncident(token: string, bookingId: string) {
+    return request<ApiEnvelope<BookingIncidentActiveResponse | null>>(
+      `/bookings/${bookingId}/incidents/active`,
+      { token }
+    );
+  },
+
+  resolveMyBookingIncident(
+    token: string,
+    bookingId: string,
+    incidentId: string,
+    body: {
+      decision:
+        | "REASSIGN_AND_CONTINUE"
+        | "RESCHEDULE_NEAREST"
+        | "RESCHEDULE_CUSTOM"
+        | "CANCEL_BY_GARAGE";
+      new_start_time?: string;
+      continuation_policy?: "RESUME_REMAINING" | "RESTART_CURRENT_ITEM";
+      customer_note?: string;
+    }
+  ) {
+    return request<ApiEnvelope<BookingIncident>>(
+      `/bookings/${bookingId}/incidents/${incidentId}/decision`,
+      {
+        method: "PATCH",
+        token,
+        body,
+      }
+    );
+  },
+
+  // ===== Customer Case (extended) =====
+  addCaseEvidence(
+    token: string,
+    caseId: string,
+    uploadIds: string[]
+  ) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/customer-cases/${caseId}/evidence`,
+      {
+        method: "POST",
+        token,
+        body: { upload_ids: uploadIds },
+      }
+    );
+  },
+
+  postCaseMessage(
+    token: string,
+    caseId: string,
+    body: { message: string; upload_ids?: string[] }
+  ) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/customer-cases/${caseId}/messages`,
+      {
+        method: "POST",
+        token,
+        body,
+      }
+    );
+  },
+
+  respondCaseResolution(
+    token: string,
+    caseId: string,
+    body: { resolution_id: string; accepted: boolean; note?: string }
+  ) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/customer-cases/${caseId}/resolution-response`,
+      {
+        method: "PATCH",
+        token,
+        body,
+      }
+    );
+  },
+
+  reopenCase(token: string, caseId: string, reason: string) {
+    return request<ApiEnvelope<CustomerCaseDetailResponse>>(
+      `/customer-cases/${caseId}/reopen`,
+      {
+        method: "POST",
+        token,
+        body: { reason },
+      }
+    );
   },
 };

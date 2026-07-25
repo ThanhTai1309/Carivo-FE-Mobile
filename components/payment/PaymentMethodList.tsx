@@ -1,38 +1,28 @@
 import { View, Text, TouchableOpacity } from "react-native";
-import { CreditCard, Wallet, Smartphone, Landmark } from "lucide-react-native";
+import { CreditCard, Landmark } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 
 interface PaymentMethod {
-  id: string;
+  id: "payos" | "cash";
   icon: LucideIcon;
   title: string;
   subtitle: string;
+  badge?: string;
 }
 
 const METHODS: PaymentMethod[] = [
   {
-    id: "card",
+    id: "payos",
     icon: CreditCard,
-    title: "Thẻ tín dụng / Ghi nợ",
-    subtitle: "Visa, Mastercard, JCB",
+    title: "PayOS Online",
+    subtitle: "QR ngân hàng, thẻ Visa/Master/JCB",
+    badge: "Khuyến nghị",
   },
   {
-    id: "momo",
-    icon: Wallet,
-    title: "Ví MoMo",
-    subtitle: "Thanh toán nhanh qua ví",
-  },
-  {
-    id: "zalo",
-    icon: Smartphone,
-    title: "Ví ZaloPay",
-    subtitle: "Thanh toán an toàn",
-  },
-  {
-    id: "bank",
+    id: "cash",
     icon: Landmark,
-    title: "Chuyển khoản ngân hàng",
-    subtitle: "VietQR / Chuyển khoản 24/7",
+    title: "Tiền mặt tại garage",
+    subtitle: "Thanh toán trực tiếp sau khi rửa xe xong",
   },
 ];
 
@@ -82,14 +72,22 @@ export default function PaymentMethodList({
                   />
                 </View>
                 <View className="flex-1">
-                  <Text className="text-sm font-semibold text-foreground">
-                    {method.title}
-                  </Text>
-                  <Text className="text-xs text-muted-foreground">
+                  <View className="flex-row items-center gap-2">
+                    <Text className="text-sm font-semibold text-foreground">
+                      {method.title}
+                    </Text>
+                    {method.badge ? (
+                      <View className="rounded-full bg-primary/15 px-2 py-0.5">
+                        <Text className="text-[10px] font-bold text-primary tracking-wide">
+                          {method.badge}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text className="text-xs text-muted-foreground mt-0.5">
                     {method.subtitle}
                   </Text>
                 </View>
-                {/* Radio button */}
                 <View
                   className={`w-5 h-5 rounded-full border-2 items-center justify-center ${
                     selected ? "border-primary" : "border-muted-foreground"

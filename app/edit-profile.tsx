@@ -70,7 +70,10 @@ export default function EditProfileScreen() {
 
     setSendingOtp(true);
     try {
-      const challenge = await requestPhoneVerification(phone.trim());
+      const challenge = await requestPhoneVerification(
+        phone.trim(),
+        "CHANGE_PHONE"
+      );
       setChallengeId(challenge.challenge_id);
       setOtpSent(true);
       Alert.alert(

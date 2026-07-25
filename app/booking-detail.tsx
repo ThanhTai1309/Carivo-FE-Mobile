@@ -3,18 +3,22 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Linking,
   RefreshControl,
   ScrollView,
+  Share,
   Text,
   TouchableOpacity,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
+  AlertTriangle,
   CalendarClock,
   CarFront,
+  CheckCircle2,
   CircleCheck,
   CircleX,
   ClipboardList,
@@ -23,17 +27,22 @@ import {
   CreditCard,
   ExternalLink,
   Hash,
+  Hourglass,
   Info,
   MapPin,
   Receipt,
   RefreshCw,
   RotateCcw,
+  Share2,
   ShieldCheck,
   Star,
+  Truck,
   Wrench,
   X,
+  XCircle,
 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
+import LoadingButton from "@/components/common/LoadingButton";
 import { api, ApiError } from "@/lib/api";
 import {
   formatCurrency,
@@ -43,10 +52,15 @@ import {
 } from "@/lib/format";
 import type {
   Booking,
+  BookingHandover,
+  BookingHandoverState,
+  BookingIncident,
   BookingInspection,
+  PaymentTransaction,
   WashHistory,
 } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
+import { usePolling } from "@/hooks/usePolling";
 
 interface TimelineStep {
   id: string;
@@ -167,7 +181,8 @@ function TimelineRow({ step, isLast }: { step: TimelineStep; isLast: boolean }) 
 function buildTimelineSteps(
   booking: Booking,
   inspectionCount: number,
-  wash: WashHistory | null
+  wash: WashHistory | null,
+  handover: BookingHandover | null
 ): TimelineStep[] {
   const steps: TimelineStep[] = [];
   const order = ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED"];
@@ -229,17 +244,70 @@ function buildTimelineSteps(
     });
   }
 
-  // Step 5: Completed
+  // Step 5: Completed (service done)
   steps.push({
     id: "completed",
-    label: "Hoàn thành",
+    label: "Hoàn thành dịch vụ",
     description:
       booking.status === "COMPLETED"
-        ? "Cảm ơn bạn đã sử dụng Carivo"
+        ? "Garage đã hoàn tất kiểm tra, sẵn sàng bàn giao xe."
         : "Sau khi hoàn tất sẽ có thông báo",
     icon: CircleCheck,
     state: currentIdx >= 4 ? "done" : "pending",
     timestamp: wash?.service_completed_at,
+  });
+
+  // Step 6: Handover ready (chỉ hiển thị khi đã COMPLETED)
+  if (currentIdx >= 4) {
+    const handoverState: BookingHandoverState | null = handover?.state ?? null;
+    const handoverDone = handoverState === "RELEASED";
+    const handoverReady =
+      handoverState === "READY_FOR_CUSTOMER" ||
+      handoverState === "ON_HOLD";
+    const handoverAccepted = handover?.customer_response === "ACCEPTED";
+
+    let handoverLabel = "Bàn giao xe";
+    let handoverDesc =
+      "Garage chuẩn bị ảnh kiểm tra trước khi giao xe cho bạn.";
+    let handoverStateValue: "done" | "current" | "pending" = "pending";
+
+    if (handoverDone) {
+      handoverLabel = "Hoàn tất bàn giao";
+      handoverDesc = "Bạn đã nhận xe và thanh toán xong.";
+      handoverStateValue = "done";
+    } else if (handoverAccepted) {
+      handoverLabel = "Đã xác nhận nhận xe";
+      handoverDesc =
+        "Bạn đã xác nhận. Garage sẽ hoàn tất thủ tục thanh toán.";
+      handoverStateValue = "done";
+    } else if (handoverReady) {
+      handoverLabel = "Sẵn sàng nhận xe";
+      handoverDesc = "Bấm để xem ảnh kiểm tra và xác nhận nhận xe.";
+      handoverStateValue = "current";
+    }
+
+    steps.push({
+      id: "handover",
+      label: handoverLabel,
+      description: handoverDesc,
+      icon: Truck,
+      state: handoverStateValue,
+      timestamp: (handover?.released_at ?? handover?.accepted_at ?? handover?.ready_at) ?? undefined,
+    });
+  }
+
+  // Step 7: Payment completed (final)
+  const isPaid =
+    booking.payment_status === "PAID" || booking.payment_status === "WAIVED";
+  steps.push({
+    id: "payment",
+    label: "Thanh toán xong",
+    description: isPaid
+      ? "Cảm ơn bạn đã sử dụng Carivo."
+      : "Chờ thanh toán để hoàn tất lịch hẹn.",
+    icon: isPaid ? CheckCircle2 : CreditCard,
+    state: isPaid ? "done" : "pending",
+    timestamp: wash?.paid_at ?? booking.paid_at ?? undefined,
   });
 
   return steps;
@@ -254,9 +322,65 @@ export default function BookingDetailScreen() {
   const [booking, setBooking] = useState<Booking | null>(null);
   const [inspections, setInspections] = useState<BookingInspection[]>([]);
   const [wash, setWash] = useState<WashHistory | null>(null);
+  const [handover, setHandover] = useState<BookingHandover | null>(null);
+  const [activeIncident, setActiveIncident] = useState<BookingIncident | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [payosPayment, setPayosPayment] = useState<PaymentTransaction | null>(
+    null
+  );
+  const [openingCheckout, setOpeningCheckout] = useState(false);
+  const [cancellingPayment, setCancellingPayment] = useState(false);
+
+  // Auto-poll booking when waiting for staff confirmation or PayOS.
+  const shouldPoll =
+    booking != null &&
+    (booking.status === "PENDING" ||
+      (payosPayment != null &&
+        (payosPayment.status === "PENDING" ||
+          payosPayment.status === "INITIATED" ||
+          payosPayment.status === "CANCELING")));
+
+  usePolling<Booking>({
+    enabled: Boolean(shouldPoll && accessToken && bookingId),
+    intervalMs: 5000,
+    maxIntervalMs: 15000,
+    fetcher: async () => {
+      if (!accessToken || !bookingId) {
+        throw new Error("Missing token or bookingId");
+      }
+      const response = await api.getBooking(accessToken, bookingId);
+      const latest = response.data;
+      if (latest) setBooking(latest);
+      // also refresh PayOS state when relevant
+      if (payosPayment) {
+        try {
+          const payosResponse = await api.getPayosPayment(
+            accessToken,
+            bookingId
+          );
+          setPayosPayment(payosResponse.data?.payment ?? null);
+        } catch {
+          // ignore
+        }
+      }
+      return latest;
+    },
+    stopWhen: (latest) =>
+      latest.status !== "PENDING" &&
+      !(
+        payosPayment != null &&
+        (payosPayment.status === "PENDING" ||
+          payosPayment.status === "INITIATED" ||
+          payosPayment.status === "CANCELING")
+      ),
+    onError: () => {
+      // silent — keep polling
+    },
+  });
 
   const loadData = useCallback(
     async (silent = false) => {
@@ -270,32 +394,75 @@ export default function BookingDetailScreen() {
         const fetchedBooking = bookingResponse.data;
         setBooking(fetchedBooking);
 
-        const [inspectionResponse, washListResponse] = await Promise.all([
-          (api.getBookingInspections(accessToken, bookingId) as Promise<
-            Awaited<ReturnType<typeof api.getBookingInspections>>
-          >).catch(
-            () =>
-              ({
-                success: true,
-                data: [] as BookingInspection[],
-              }) as Awaited<
-                ReturnType<typeof api.getBookingInspections>
-              >
-          ),
-          api.getWashHistories(accessToken, { booking_id: bookingId }).catch(
-            () =>
-              ({
-                success: true,
-                data: [] as WashHistory[],
-              }) as Awaited<
-                ReturnType<typeof api.getWashHistories>
-              >
-          ),
-        ]);
+        const [inspectionResponse, washListResponse, payosResponse] =
+          await Promise.all([
+            (api.getBookingInspections(accessToken, bookingId) as Promise<
+              Awaited<ReturnType<typeof api.getBookingInspections>>
+            >).catch(
+              () =>
+                ({
+                  success: true,
+                  data: [] as BookingInspection[],
+                }) as Awaited<
+                  ReturnType<typeof api.getBookingInspections>
+                >
+            ),
+            api.getWashHistories(accessToken, { booking_id: bookingId }).catch(
+              () =>
+                ({
+                  success: true,
+                  data: [] as WashHistory[],
+                }) as Awaited<
+                  ReturnType<typeof api.getWashHistories>
+                >
+            ),
+            api.getPayosPayment(accessToken, bookingId).catch(() => null),
+          ]);
 
         setInspections(inspectionResponse.data ?? []);
         const washData = (washListResponse.data ?? [])[0] ?? null;
         setWash(washData);
+
+        const payosData = payosResponse?.data?.payment ?? null;
+        setPayosPayment(payosData);
+
+        // Handover chỉ có khi booking đã COMPLETED — gọi riêng để 404 không chặn flow
+        if (fetchedBooking?.status === "COMPLETED") {
+          try {
+            const handoverResponse = await api.getMyHandover(
+              accessToken,
+              bookingId
+            );
+            setHandover(handoverResponse.data ?? null);
+          } catch (err) {
+            if (err instanceof ApiError && err.status !== 404) {
+              console.warn("Failed to load handover", err.message);
+            }
+            setHandover(null);
+          }
+        } else {
+          setHandover(null);
+        }
+
+        // Incident active (chỉ khi booking đang IN_PROGRESS / CONFIRMED / CHECKED_IN)
+        if (
+          fetchedBooking?.operation_status === "AWAITING_CUSTOMER_DECISION"
+        ) {
+          try {
+            const incidentResponse = await api.getMyActiveBookingIncident(
+              accessToken,
+              bookingId
+            );
+            setActiveIncident(incidentResponse.data?.incident ?? null);
+          } catch (err) {
+            if (err instanceof ApiError && err.status !== 404) {
+              console.warn("Failed to load incident", err.message);
+            }
+            setActiveIncident(null);
+          }
+        } else {
+          setActiveIncident(null);
+        }
       } catch (error) {
         const message =
           error instanceof ApiError
@@ -315,6 +482,15 @@ export default function BookingDetailScreen() {
       void loadData();
     }
   }, [isHydrated, isAuthenticated, bookingId, loadData]);
+
+  // Auto-reload when screen regains focus (e.g. returned from payment-success)
+  useFocusEffect(
+    useCallback(() => {
+      if (isHydrated && isAuthenticated && bookingId) {
+        void loadData(true);
+      }
+    }, [isHydrated, isAuthenticated, bookingId, loadData])
+  );
 
   const handleCancel = () => {
     if (!booking) return;
@@ -363,14 +539,192 @@ export default function BookingDetailScreen() {
     });
   };
 
+  const handleOpenSurvey = () => {
+    if (!booking) return;
+    router.push({
+      pathname: "/survey-response",
+      params: { bookingId: booking.id },
+    });
+  };
+
+  const handleShare = async () => {
+    if (!booking) return;
+    const shortId = booking.id.slice(0, 8).toUpperCase();
+    const garageName = booking.garage?.name ?? "Garage";
+    const serviceName =
+      booking.service_package?.name ?? "Dịch vụ rửa xe";
+    const startTimeText = booking.start_time
+      ? formatDateTime(booking.start_time)
+      : "—";
+    const totalText = formatCurrency(
+      booking.final_price ?? booking.original_price ?? 0
+    );
+    const vehiclePlate = booking.vehicle?.raw_license_plate
+      ? ` • Biển số: ${booking.vehicle.raw_license_plate}`
+      : "";
+
+    const shareTitle = `Lịch hẹn Carivo #${shortId}`;
+    const shareMessage = [
+      `🚗 Lịch hẹn rửa xe Carivo`,
+      `Mã: ${shortId}`,
+      `Garage: ${garageName}`,
+      `Dịch vụ: ${serviceName}`,
+      `Thời gian: ${startTimeText}${vehiclePlate}`,
+      `Tổng: ${totalText}`,
+      ``,
+      `Mở app Carivo để xem chi tiết.`,
+    ].join("\n");
+
+    try {
+      await Share.share(
+        {
+          title: shareTitle,
+          message: shareMessage,
+        },
+        { dialogTitle: shareTitle }
+      );
+    } catch {
+      // user cancelled
+    }
+  };
+
+  const handlePayNow = async () => {
+    if (!accessToken || !booking) return;
+    setOpeningCheckout(true);
+    try {
+      const paymentResponse = await api.createPayosPayment(
+        accessToken,
+        booking.id
+      );
+      const checkoutUrl = paymentResponse.data?.payment?.checkout_url;
+      if (!checkoutUrl) {
+        Alert.alert(
+          "Không có liên kết thanh toán",
+          "Vui lòng thử lại sau ít phút."
+        );
+        return;
+      }
+      const supported = await Linking.canOpenURL(checkoutUrl);
+      if (!supported) {
+        Alert.alert(
+          "Không thể mở liên kết",
+          "Thiết bị không hỗ trợ mở liên kết thanh toán."
+        );
+        return;
+      }
+      await Linking.openURL(checkoutUrl);
+      router.push({
+        pathname: "/payment-success",
+        params: {
+          bookingId: booking.id,
+          total: String(booking.final_price ?? booking.original_price ?? 0),
+          paymentMethod: "PAYOS",
+          pending: "1",
+          garageName: booking.garage?.name,
+          serviceName: booking.service_package?.name,
+          startTime: booking.start_time,
+          vehiclePlate: booking.vehicle?.raw_license_plate,
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.message
+          : "Không thể khởi tạo thanh toán.";
+      Alert.alert("Lỗi thanh toán", message);
+    } finally {
+      setOpeningCheckout(false);
+    }
+  };
+
+  const handleCancelPayos = () => {
+    if (!accessToken || !payosPayment) return;
+    Alert.alert(
+      "Hủy thanh toán PayOS",
+      "Bạn có chắc muốn hủy giao dịch PayOS đang chờ? Bạn có thể tạo lại liên kết thanh toán sau.",
+      [
+        { text: "Không", style: "cancel" },
+        {
+          text: "Hủy thanh toán",
+          style: "destructive",
+          onPress: async () => {
+            setCancellingPayment(true);
+            try {
+              await api.cancelPayosPayment(
+                accessToken,
+                payosPayment.id,
+                "Customer hủy từ app"
+              );
+              await loadData(true);
+              Alert.alert("Thành công", "Đã hủy giao dịch PayOS.");
+            } catch (error) {
+              const message =
+                error instanceof ApiError
+                  ? error.message
+                  : "Không thể hủy thanh toán.";
+              Alert.alert("Lỗi", message);
+            } finally {
+              setCancellingPayment(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const timelineSteps = useMemo(
-    () => (booking ? buildTimelineSteps(booking, inspections.length, wash) : []),
-    [booking, inspections.length, wash]
+    () =>
+      booking
+        ? buildTimelineSteps(booking, inspections.length, wash, handover)
+        : [],
+    [booking, inspections.length, wash, handover]
   );
 
   const canCancel =
     booking && (booking.status === "PENDING" || booking.status === "CONFIRMED");
   const canRebook = booking && booking.status === "COMPLETED";
+  const canReview = booking && booking.status === "COMPLETED";
+  const isPayosPending =
+    payosPayment &&
+    (payosPayment.status === "PENDING" ||
+      payosPayment.status === "INITIATED" ||
+      payosPayment.status === "CANCELING");
+  const canPayNow =
+    booking &&
+    booking.status === "COMPLETED" &&
+    booking.payment_status !== "PAID" &&
+    !isPayosPending;
+  const canCancelPayos = booking && booking.status === "COMPLETED" && isPayosPending;
+  const showIncidentBanner =
+    booking != null &&
+    booking.operation_status === "AWAITING_CUSTOMER_DECISION" &&
+    activeIncident != null;
+  const showHandoverCta =
+    booking != null &&
+    booking.status === "COMPLETED" &&
+    handover != null &&
+    handover.state !== "RELEASED" &&
+    handover.customer_response !== "ACCEPTED";
+  const handoverRequiresPayment =
+    handover != null &&
+    handover.state === "READY_FOR_CUSTOMER" &&
+    handover.customer_response === "ACCEPTED";
+
+  const handleOpenHandover = () => {
+    if (!booking) return;
+    router.push({
+      pathname: "/booking/handover/[id]",
+      params: { id: booking.id },
+    });
+  };
+
+  const handleOpenIncidentDecision = () => {
+    if (!booking) return;
+    router.push({
+      pathname: "/booking/incident/[id]",
+      params: { id: booking.id },
+    });
+  };
 
   if (!isHydrated || loading) {
     return (
@@ -441,12 +795,24 @@ export default function BookingDetailScreen() {
           <Text className="text-base font-bold text-foreground">
             Chi tiết lịch hẹn
           </Text>
-          <TouchableOpacity
-            onPress={() => loadData(true)}
-            className="w-10 h-10 rounded-full bg-card items-center justify-center"
-          >
-            <RefreshCw size={18} color="#1a1a1a" strokeWidth={2.2} />
-          </TouchableOpacity>
+          <View className="flex-row items-center gap-2">
+            {booking ? (
+              <TouchableOpacity
+                onPress={handleShare}
+                className="w-10 h-10 rounded-full bg-card items-center justify-center"
+                accessibilityLabel="Chia sẻ lịch hẹn"
+              >
+                <Share2 size={18} color="#1a1a1a" strokeWidth={2.2} />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => loadData(true)}
+              className="w-10 h-10 rounded-full bg-card items-center justify-center"
+              accessibilityLabel="Tải lại"
+            >
+              <RefreshCw size={18} color="#1a1a1a" strokeWidth={2.2} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Hero */}
@@ -606,6 +972,17 @@ export default function BookingDetailScreen() {
                 </Text>
               </View>
             ) : null}
+            {booking.voucher_discount_amount &&
+            booking.voucher_discount_amount > 0 ? (
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm text-muted-foreground">
+                  Giảm giá voucher
+                </Text>
+                <Text className="text-sm font-medium text-emerald-600">
+                  −{formatCurrency(booking.voucher_discount_amount)}
+                </Text>
+              </View>
+            ) : null}
             <View className="h-px bg-border my-1" />
             <View className="flex-row items-center justify-between">
               <Text className="text-sm font-semibold text-foreground">
@@ -667,6 +1044,16 @@ export default function BookingDetailScreen() {
                 </Text>
                 <Text className="text-xs font-bold text-primary uppercase">
                   {booking.promotion.code}
+                </Text>
+              </View>
+            ) : null}
+            {booking.customer_voucher ? (
+              <View className="flex-row items-center justify-between mt-1">
+                <Text className="text-xs text-muted-foreground">
+                  Mã voucher
+                </Text>
+                <Text className="text-xs font-bold text-primary uppercase">
+                  {booking.customer_voucher.code ?? "Đã áp dụng"}
                 </Text>
               </View>
             ) : null}
@@ -732,54 +1119,228 @@ export default function BookingDetailScreen() {
           </View>
         ) : null}
 
+        {booking.status === "PENDING" ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4 flex-row gap-3">
+            <Hourglass size={20} color="#a16207" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-amber-800">
+                Đang chờ staff xác nhận
+              </Text>
+              <Text className="text-xs text-amber-700 mt-1 leading-5">
+                Lịch hẹn của bạn đang được garage xem xét. Bạn sẽ nhận được
+                thông báo khi staff xác nhận lịch hẹn này.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Incident banner — yêu cầu khách quyết định */}
+        {showIncidentBanner && activeIncident ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={handleOpenIncidentDecision}
+            className="mx-4 mt-4 rounded-2xl bg-red-50 border-2 border-red-200 p-4 flex-row gap-3"
+          >
+            <AlertTriangle size={20} color="#b91c1c" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-red-700">
+                Garage cần bạn quyết định
+              </Text>
+              <Text className="text-xs text-red-700 mt-1 leading-5">
+                {activeIncident.incident_type === "WASH_BAY_FAILURE"
+                  ? "Wash bay gặp sự cố, garage cần bạn chọn phương án xử lý."
+                  : activeIncident.incident_type === "STAFF_UNAVAILABLE"
+                    ? "Nhân viên phụ trách không sẵn sàng, garage cần bạn chọn phương án xử lý."
+                    : "Garage gặp sự cố và cần bạn quyết định cách xử lý."}
+              </Text>
+              <View className="flex-row items-center gap-1 mt-2">
+                <Text className="text-xs font-bold text-red-700">
+                  Bấm để chọn phương án
+                </Text>
+                <ExternalLink size={12} color="#b91c1c" strokeWidth={2.4} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* Handover banner — xe đã sẵn sàng bàn giao */}
+        {showHandoverCta ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={handleOpenHandover}
+            className="mx-4 mt-4 rounded-2xl bg-blue-50 border-2 border-blue-200 p-4 flex-row gap-3"
+          >
+            <Truck size={20} color="#1a5fd4" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-blue-800">
+                Xe của bạn đã sẵn sàng
+              </Text>
+              <Text className="text-xs text-blue-700 mt-1 leading-5">
+                Garage đã hoàn tất rửa xe và kiểm tra. Vui lòng đến garage để
+                xem ảnh kiểm tra và xác nhận nhận xe.
+              </Text>
+              <View className="flex-row items-center gap-1 mt-2">
+                <Text className="text-xs font-bold text-blue-800">
+                  Bấm để xem chi tiết
+                </Text>
+                <ExternalLink size={12} color="#1a5fd4" strokeWidth={2.4} />
+              </View>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
+        {/* Handover đã accept — thông báo đã xác nhận */}
+        {handoverRequiresPayment && !canPayNow ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex-row gap-3">
+            <CheckCircle2 size={20} color="#15803d" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-emerald-800">
+                Đã xác nhận nhận xe
+              </Text>
+              <Text className="text-xs text-emerald-700 mt-1 leading-5">
+                Cảm ơn bạn. Garage đang hoàn tất thủ tục thanh toán.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {/* Payment banner for UNPAID completed bookings */}
+        {canPayNow ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4 flex-row gap-3">
+            <AlertTriangle size={20} color="#a16207" strokeWidth={2.4} />
+            <View className="flex-1">
+              <Text className="text-sm font-bold text-amber-800">
+                Lịch hẹn chưa được thanh toán
+              </Text>
+              <Text className="text-xs text-amber-700 mt-1 leading-5">
+                Garage đã hoàn tất dịch vụ. Vui lòng thanh toán{" "}
+                {formatCurrency(
+                  booking.final_price ?? booking.original_price ?? 0
+                )}{" "}
+                để hoàn tất.
+              </Text>
+            </View>
+          </View>
+        ) : null}
+
+        {isPayosPending && booking ? (
+          <View className="mx-4 mt-4 rounded-2xl bg-blue-50 border border-blue-200 p-4 gap-2">
+            <View className="flex-row items-center gap-2">
+              <CreditCard size={18} color="#1a5fd4" strokeWidth={2.4} />
+              <Text className="text-sm font-bold text-blue-800">
+                Thanh toán đang chờ xử lý
+              </Text>
+            </View>
+            <Text className="text-xs text-blue-700 leading-5">
+              Hệ thống đang chờ PayOS xác nhận giao dịch của bạn. Trạng thái
+              sẽ tự cập nhật khi hoàn tất — bạn có thể hủy giao dịch này bên
+              dưới nếu cần.
+            </Text>
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs text-blue-700">Mã giao dịch</Text>
+              <Text className="text-xs font-bold text-blue-900">
+                #{payosPayment?.order_code}
+              </Text>
+            </View>
+            <View className="flex-row items-center justify-between">
+              <Text className="text-xs text-blue-700">Số tiền</Text>
+              <Text className="text-xs font-bold text-blue-900">
+                {formatCurrency(payosPayment?.amount ?? 0)}
+              </Text>
+            </View>
+            {payosPayment?.expires_at ? (
+              <View className="flex-row items-center justify-between">
+                <Text className="text-xs text-blue-700">Hết hạn</Text>
+                <Text className="text-xs font-medium text-blue-900">
+                  {formatDateTime(payosPayment.expires_at)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
         {/* Actions */}
         <View className="px-4 mt-6 gap-3">
-          {canCancel ? (
+          {showIncidentBanner ? (
+            <LoadingButton
+              title="Xử lý sự cố ngay"
+              onPress={handleOpenIncidentDecision}
+              variant="danger"
+              icon={AlertTriangle}
+            />
+          ) : null}
+
+          {showHandoverCta ? (
+            <LoadingButton
+              title="Xem chi tiết bàn giao xe"
+              onPress={handleOpenHandover}
+              variant="primary"
+              icon={Truck}
+              className="shadow-lg shadow-primary/30"
+            />
+          ) : handover &&
+            handover.state === "READY_FOR_CUSTOMER" &&
+            handover.customer_response === "ACCEPTED" ? (
             <TouchableOpacity
-              onPress={handleCancel}
-              disabled={cancelling}
+              onPress={handleOpenHandover}
               activeOpacity={0.85}
-              className="rounded-2xl border border-red-400 bg-red-50 py-4 flex-row items-center justify-center gap-2"
+              className="rounded-2xl bg-card border border-border py-3.5 flex-row items-center justify-center gap-2"
             >
-              {cancelling ? (
-                <ActivityIndicator color="#b91c1c" />
-              ) : (
-                <>
-                  <X size={18} color="#b91c1c" strokeWidth={2.4} />
-                  <Text className="text-red-600 font-bold text-base">
-                    Hủy lịch hẹn
-                  </Text>
-                </>
-              )}
+              <Info size={16} color="#1a5fd4" strokeWidth={2.2} />
+              <Text className="text-primary font-semibold text-sm">
+                Xem chi tiết bàn giao
+              </Text>
+              <ExternalLink size={14} color="#1a5fd4" strokeWidth={2.4} />
             </TouchableOpacity>
+          ) : null}
+
+          {canPayNow ? (
+            <LoadingButton
+              title="Thanh toán ngay qua PayOS"
+              onPress={handlePayNow}
+              loading={openingCheckout}
+              loadingTitle="Đang mở PayOS..."
+              variant="primary"
+              icon={CreditCard}
+              className="shadow-lg shadow-primary/30"
+            />
+          ) : null}
+
+          {canCancelPayos ? (
+            <LoadingButton
+              title="Hủy giao dịch PayOS đang chờ"
+              onPress={handleCancelPayos}
+              loading={cancellingPayment}
+              loadingTitle="Đang hủy thanh toán..."
+              variant="secondary"
+              icon={XCircle}
+              iconPosition="left"
+            />
+          ) : null}
+
+          {canCancel ? (
+            <LoadingButton
+              title="Hủy lịch hẹn"
+              onPress={handleCancel}
+              loading={cancelling}
+              loadingTitle="Đang hủy lịch..."
+              variant="danger"
+              icon={X}
+            />
           ) : null}
           {canRebook ? (
-            <TouchableOpacity
+            <LoadingButton
+              title="Đặt lại dịch vụ này"
               onPress={handleRebook}
-              activeOpacity={0.85}
-              className="rounded-2xl bg-primary py-4 flex-row items-center justify-center gap-2"
-              style={{
-                shadowColor: "#1a5fd4",
-                shadowOffset: { width: 0, height: 6 },
-                shadowOpacity: 0.28,
-                shadowRadius: 10,
-                elevation: 4,
-              }}
-            >
-              <RotateCcw size={18} color="#ffffff" strokeWidth={2.4} />
-              <Text className="text-white font-bold text-base">
-                Đặt lại dịch vụ này
-              </Text>
-            </TouchableOpacity>
+              variant="primary"
+              icon={RotateCcw}
+              className="shadow-lg shadow-primary/30"
+            />
           ) : null}
-          {booking.status === "COMPLETED" ? (
+          {canReview ? (
             <TouchableOpacity
-              onPress={() =>
-                router.push({
-                  pathname: "/(tabs)/profile",
-                })
-              }
-              activeOpacity={0.7}
+              onPress={handleOpenSurvey}
+              activeOpacity={0.85}
               className="rounded-2xl bg-card border border-border py-3.5 flex-row items-center justify-center gap-2"
             >
               <Star size={16} color="#1a5fd4" strokeWidth={2.2} />
