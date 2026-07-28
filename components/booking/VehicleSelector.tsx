@@ -1,6 +1,5 @@
-import { View, Text, TouchableOpacity } from "react-native";
-import { Car, Bike } from "lucide-react-native";
-import type { LucideIcon } from "lucide-react-native";
+import { Text, TouchableOpacity, View } from "react-native";
+import { Check, LucideIcon } from "lucide-react-native";
 
 interface Vehicle {
   id: string;
@@ -20,36 +19,72 @@ export default function VehicleSelector({
   selectedId,
   onSelect,
 }: VehicleSelectorProps) {
+  const hasSelection = Boolean(selectedId);
+
   return (
-    <View className="px-4 mb-4">
-      <Text className="text-lg font-bold text-foreground mb-2">
-        Chọn phương tiện
-      </Text>
-      <View className="flex-row gap-3">
-        {vehicles.map((v) => {
-          const Icon = v.icon;
-          const selected = v.id === selectedId;
+    <View className="px-4 mb-6">
+      <View className="flex-row items-center gap-2 mb-3">
+        <View className="w-1.5 h-6 rounded-full bg-primary" />
+        <Text className="font-bold text-xl text-foreground flex-1">
+          Phương tiện của bạn
+        </Text>
+        {hasSelection ? (
+          <TouchableOpacity
+            onPress={() => onSelect("")}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text className="text-primary text-sm font-medium">
+              Thay đổi
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <Text className="text-xs text-muted-foreground">
+            {vehicles.length} xe
+          </Text>
+        )}
+      </View>
+
+      <View className="gap-2.5">
+        {vehicles.map((vehicle) => {
+          const Icon = vehicle.icon;
+          const selected = vehicle.id === selectedId;
           return (
             <TouchableOpacity
-              key={v.id}
-              onPress={() => onSelect(v.id)}
-              className={`flex-1 rounded-xl p-4 flex-col items-center gap-1 bg-card ${
-                selected ? "border-2 border-primary" : "border border-border"
+              key={vehicle.id}
+              onPress={() => onSelect(vehicle.id)}
+              activeOpacity={0.8}
+              className={`flex-row items-center gap-3 bg-card rounded-xl border-2 px-4 py-3 ${
+                selected ? "border-primary" : "border-border"
               }`}
             >
-              <Icon
-                size={28}
-                color={selected ? "#1a56db" : "#8a96a8"}
-                strokeWidth={1.72}
-              />
-              <Text
-                className={`text-sm font-semibold ${
-                  selected ? "text-foreground" : "text-muted-foreground"
+              <View
+                className={`w-11 h-11 rounded-lg items-center justify-center ${
+                  selected ? "bg-secondary" : "bg-secondary"
                 }`}
               >
-                {v.name}
-              </Text>
-              <Text className="text-xs text-muted-foreground">{v.plate}</Text>
+                <Icon size={22} color="#1a5fd4" strokeWidth={2} />
+              </View>
+              <View className="flex-1">
+                <Text
+                  className="font-semibold text-sm text-foreground leading-tight"
+                  numberOfLines={1}
+                >
+                  {vehicle.name}
+                </Text>
+                <Text
+                  className="text-xs text-muted-foreground mt-0.5"
+                  numberOfLines={1}
+                >
+                  {vehicle.plate}
+                </Text>
+              </View>
+              {selected ? (
+                <View className="w-7 h-7 rounded-full bg-primary items-center justify-center">
+                  <Check size={16} color="#ffffff" strokeWidth={3} />
+                </View>
+              ) : (
+                <View className="w-7 h-7 rounded-full border-2 border-border" />
+              )}
             </TouchableOpacity>
           );
         })}
