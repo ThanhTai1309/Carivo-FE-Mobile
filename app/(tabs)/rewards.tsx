@@ -34,6 +34,46 @@ import type {
 } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
+type LoyaltyTransactionType =
+  | "EARN"
+  | "REDEEM"
+  | "REFUND"
+  | "EXPIRE"
+  | "ADJUST"
+  | string;
+
+const TRANSACTION_TYPE_LABEL: Record<string, string> = {
+  EARN: "Tích điểm",
+  REDEEM: "Dùng điểm",
+  REFUND: "Hoàn điểm",
+  EXPIRE: "Hết hạn điểm",
+  ADJUST: "Điều chỉnh điểm",
+};
+
+const TRANSACTION_DESCRIPTION_PREFIX: Record<string, string> = {
+  EARN: "Cộng điểm từ lịch rửa xe đã hoàn thành",
+  REDEEM: "Dùng điểm để giảm giá cho lịch đặt",
+  REFUND: "Hoàn lại điểm do lịch đặt bị hủy",
+  EXPIRE: "Điểm tích lũy đã hết hạn",
+  ADJUST: "Điều chỉnh điểm thủ công bởi hệ thống",
+};
+
+function translateTransactionDescription(
+  transaction: LoyaltyTransaction
+): string {
+  const fallback =
+    TRANSACTION_DESCRIPTION_PREFIX[transaction.type ?? ""] ??
+    "Giao dịch điểm thưởng";
+  const raw = transaction.description?.trim();
+  if (!raw) return fallback;
+  const lower = raw.toLowerCase();
+  if (lower.startsWith("earn points from completed paid booking")) return fallback;
+  if (lower.startsWith("redeem points for booking discount")) return fallback;
+  if (lower.startsWith("refund redeemed points for canceled booking")) return fallback;
+  if (lower.startsWith("expire unused loyalty points")) return fallback;
+  return raw;
+}
+
 type TierName = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM";
 
 const TIER_ORDER: TierName[] = ["BRONZE", "SILVER", "GOLD", "PLATINUM"];
@@ -220,12 +260,13 @@ function TierProgressCard({
           {nextRule ? (
             <>
               <View className="flex-row items-center justify-between mb-2">
-                <Text className="text-xs text-white/80">
-                  Tiến trình lên{" "}
-                  <Text className="text-white font-bold">
-                    {nextRule.tier_name}
-                  </Text>
+<Text className="text-xs text-white/80">
+                Tiến trình lên{" "}
+                <Text className="text-white font-bold">
+                  {TIER_PRESENTATION[normalizeTier(nextRule.tier_name)]?.label ??
+                    nextRule.tier_name}
                 </Text>
+              </Text>
                 <Text className="text-xs text-white/80">
                   {Math.round(progress)}%
                 </Text>
@@ -386,7 +427,7 @@ function TierLadder({ rules, currentTier }: TierLadderProps) {
                     isCurrent ? "text-primary" : "text-foreground"
                   }`}
                 >
-                  {rule.tier_name}
+                  {TIER_PRESENTATION[tierName]?.label ?? rule.tier_name}
                 </Text>
                 {isCurrent ? (
                   <View className="rounded-full bg-primary px-2 py-0.5">
@@ -541,7 +582,7 @@ export default function RewardsScreen() {
     return (
       <SafeAreaView className="flex-1 bg-background">
         <ScreenState
-          title="Điểm thưởng customer"
+          title="Điểm thưởng của bạn"
           description="Đăng nhập để xem điểm tích lũy, hạng thành viên và lịch sử cộng/trừ điểm."
           actionLabel="Đăng nhập"
           onAction={() => router.push("/login")}
@@ -556,7 +597,7 @@ export default function RewardsScreen() {
         <ScreenState
           loading
           title="Đang tải điểm thưởng"
-          description="Đang lấy dữ liệu loyalty của customer."
+          description="Đang lấy dữ liệu điểm thưởng của bạn."
         />
       </SafeAreaView>
     );
@@ -686,12 +727,12 @@ export default function RewardsScreen() {
                           className="text-sm font-semibold text-foreground"
                           numberOfLines={1}
                         >
-                          {transaction.description ??
-                            transaction.type ??
-                            "Giao dịch điểm"}
+                          {translateTransactionDescription(transaction)}
                         </Text>
                         <Text className="text-xs text-muted-foreground mt-0.5">
-                          {formatDateTime(transaction.created_at)}
+                          {transaction.type
+                            ? `${TRANSACTION_TYPE_LABEL[transaction.type] ?? "Giao dịch điểm"} · ${formatDateTime(transaction.created_at)}`
+                            : formatDateTime(transaction.created_at)}
                         </Text>
                       </View>
                       <Text

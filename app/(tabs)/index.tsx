@@ -5,7 +5,10 @@ import { useFocusEffect, useRouter } from "expo-router";
 import HomeHeader from "@/components/HomeHeader";
 import PromoBanner from "@/components/PromoBanner";
 import MyCarSection from "@/components/MyCarSection";
-import FeaturedServices from "@/components/FeaturedServices";
+import FeaturedServiceGrid from "@/components/home/FeaturedServiceGrid";
+import ComboSection from "@/components/home/ComboSection";
+import CustomerReviews from "@/components/home/CustomerReviews";
+import NewsSection from "@/components/home/NewsSection";
 import StatsRow from "@/components/StatsRow";
 import SectionHeader from "@/components/home/SectionHeader";
 import ScreenState from "@/components/common/ScreenState";
@@ -131,6 +134,27 @@ export default function HomeScreen() {
     plate: vehicle.raw_license_plate,
   }));
 
+  const handleServiceSelect = (service: { id: string; name: string }) => {
+    router.push({
+      pathname: "/service/[id]",
+      params: { id: service.id, name: service.name },
+    });
+  };
+
+  const handleComboSelect = (combo: { id: string; name: string }) => {
+    router.push({
+      pathname: "/combo/[id]",
+      params: { id: combo.id, name: combo.name },
+    });
+  };
+
+  const handleNewsSelect = (news: { id: string; title: string }) => {
+    router.push({
+      pathname: "/news/[id]",
+      params: { id: news.id, title: news.title },
+    });
+  };
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
       <ScrollView
@@ -173,6 +197,7 @@ export default function HomeScreen() {
           }
         />
 
+        {/* Xe của tôi */}
         <MyCarSection
           cars={primaryCars}
           isGuest={!isAuthenticated}
@@ -182,21 +207,24 @@ export default function HomeScreen() {
           onCarPress={() => router.push("/my-vehicles")}
           onAddCar={() => router.push(isAuthenticated ? "/my-vehicles" : "/login")}
         />
+        {/* Dịch vụ nổi bật */}
+        <FeaturedServiceGrid onSelect={handleServiceSelect} />
 
-        <FeaturedServices
-          services={services}
-          onSelect={(service) =>
-            router.push({
-              pathname: "/(tabs)/booking",
-              params: { servicePackageId: service.id },
-            })
-          }
-        />
+        {/* Combo đặc biệt */}
+        <ComboSection onSelect={handleComboSelect} />
 
+        {/* Đánh giá khách hàng */}
+        <CustomerReviews />
+
+        {/* Tin tức & Sự kiện */}
+        <NewsSection onSelect={handleNewsSelect} />
+
+        
+
+        {/* Stats Row */}
         <View className="px-4 mt-5">
           <SectionHeader title="Hoạt động của bạn" />
         </View>
-
         <StatsRow
           waitMinutes={waitMinutes}
           loyaltyPoints={loyaltyPoints}

@@ -14,10 +14,10 @@ import {
   ArrowRight,
   Bike,
   Car,
+  Check,
   CheckSquare,
   ExternalLink,
   HelpCircle,
-  Square,
 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import StepIndicator from "@/components/booking/StepIndicator";
@@ -37,15 +37,11 @@ import type {
 } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
-const STEPS = [
-  { number: 1, label: "Địa điểm", state: "done" as const },
-  { number: 2, label: "Dịch vụ", state: "active" as const },
-  { number: 3, label: "Xác nhận", state: "inactive" as const },
-];
-
 function toVehicleName(vehicle: Vehicle) {
   return `${vehicle.brand ?? ""} ${vehicle.model ?? ""}`.trim() || vehicle.vehicle_type;
 }
+
+type StepState = "done" | "active" | "inactive";
 
 export default function BookingScreen() {
   const router = useRouter();
@@ -77,12 +73,14 @@ export default function BookingScreen() {
 
   const dateOptions = useMemo(
     () =>
-      Array.from({ length: 5 }, (_, index) => {
+      Array.from({ length: 7 }, (_, index) => {
         const date = addDays(new Date(), index);
         return {
           dayLabel: new Intl.DateTimeFormat("vi-VN", { weekday: "short" }).format(date),
           date: Number(new Intl.DateTimeFormat("vi-VN", { day: "2-digit" }).format(date)),
+          monthLabel: new Intl.DateTimeFormat("vi-VN", { month: "2-digit" }).format(date),
           dateKey: toDateInputValue(date),
+          isToday: index === 0,
         };
       }),
     []
@@ -125,7 +123,7 @@ export default function BookingScreen() {
         if (incomingGarageId && garageData.some((g) => g.id === incomingGarageId)) {
           return incomingGarageId;
         }
-        return current || garageData[0]?.id || "";
+        return current;
       });
 
       if (isAuthenticated && accessToken) {
@@ -142,12 +140,7 @@ export default function BookingScreen() {
           ) {
             return incomingVehicleId;
           }
-          return (
-            current ||
-            vehicleData.find((vehicle) => vehicle.is_default)?.id ||
-            vehicleData[0]?.id ||
-            ""
-          );
+          return current;
         });
       } else {
         setVehicles([]);
@@ -405,6 +398,32 @@ export default function BookingScreen() {
     );
   };
 
+  const step1: StepState = selectedGarage ? "done" : "active";
+  // Bước 2: Phương tiện — chỉ yêu cầu nếu user đã auth
+  const step2: StepState = !selectedGarage
+    ? "inactive"
+    : !isAuthenticated
+      ? "inactive"
+      : selectedVehicle
+        ? "done"
+        : "active";
+  // Bước 3: Dịch vụ — cần garage + (vehicle nếu auth)
+  const step3: StepState = !selectedGarage
+    ? "inactive"
+    : isAuthenticated && !selectedVehicle
+      ? "inactive"
+      : selectedService
+        ? "done"
+        : "active";
+  // Bước 4: Thời gian — cần đủ các bước trên
+  const step4: StepState = !selectedGarage ||
+    (isAuthenticated && !selectedVehicle) ||
+    !selectedService
+    ? "inactive"
+    : selectedSlot
+      ? "done"
+      : "active";
+
   const handleBack = () => {
     if (router.canGoBack()) {
       router.back();
@@ -415,12 +434,31 @@ export default function BookingScreen() {
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
-      <View className="flex-row items-center justify-between px-4 pt-5 pb-3 bg-background">
+      <View
+        className="flex-row items-center justify-between px-4 pt-3 pb-2 bg-background"
+        style={{
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.04,
+          shadowRadius: 3,
+          elevation: 1,
+        }}
+      >
         <View className="flex-row items-center gap-3">
-          <TouchableOpacity onPress={handleBack}>
-            <ArrowLeft size={22} color="#1a1a1a" strokeWidth={2.2} />
+          <TouchableOpacity
+            onPress={handleBack}
+            className="w-10 h-10 rounded-full items-center justify-center bg-card"
+          >
+            <ArrowLeft size={20} color="#1a1a1a" strokeWidth={2.4} />
           </TouchableOpacity>
-          <Text className="text-lg font-bold text-primary">Đặt lịch rửa xe</Text>
+          <View>
+            <Text className="text-base font-extrabold text-foreground">
+              Đặt lịch rửa xe
+            </Text>
+            <Text className="text-[11px] text-muted-foreground mt-0.5">
+              Hoàn tất các bước để giữ chỗ
+            </Text>
+          </View>
         </View>
         <TouchableOpacity
           onPress={() =>
@@ -431,11 +469,16 @@ export default function BookingScreen() {
           }
           className="w-9 h-9 rounded-full border border-border items-center justify-center bg-card"
         >
-          <HelpCircle size={20} color="#1a1a1a" strokeWidth={2.4} />
+          <HelpCircle size={18} color="#1a1a1a" strokeWidth={2.4} />
         </TouchableOpacity>
       </View>
 
-      <StepIndicator steps={STEPS} />
+      <StepIndicator
+        step1={step1}
+        step2={step2}
+        step3={step3}
+        step4={step4}
+      />
 
       <ScrollView
         className="flex-1"
@@ -443,20 +486,33 @@ export default function BookingScreen() {
         contentContainerStyle={{ paddingBottom: 16 }}
       >
         {/* 1. Chọn garage */}
-        <View className="px-4 mb-4">
-          <View className="flex-row items-center justify-between mb-2">
-            <Text className="text-lg font-bold text-foreground">
+        <View className="px-4 mb-6">
+          <View className="flex-row items-center gap-2 mb-3">
+            <View className="w-1.5 h-6 rounded-full bg-primary" />
+            <Text className="font-bold text-xl text-foreground flex-1">
               Chọn garage
             </Text>
-            <Text className="text-sm text-muted-foreground">
-              {garages.length} địa điểm
-            </Text>
+            {selectedGarage ? (
+              <TouchableOpacity
+                onPress={() => setSelectedGarageId("")}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text className="text-primary text-sm font-medium">
+                  Thay đổi
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <Text className="text-xs text-muted-foreground">
+                {garages.length} địa điểm
+              </Text>
+            )}
           </View>
 
           <View className="gap-3">
-            {garages.map((garage) => (
+            {garages.map((garage, garageIndex) => (
               <View key={garage.id} className="gap-1.5">
                 <GarageCard
+                  index={garageIndex}
                   name={garage.name}
                   distance={garage.address ?? "Xem chi tiết tại hồ sơ garage"}
                   rating={
@@ -532,18 +588,34 @@ export default function BookingScreen() {
         )}
 
         {/* 3. Chọn dịch vụ chính */}
-        <View className="px-4 mb-4">
-          <Text className="text-lg font-bold text-foreground mb-1">
-            Dịch vụ chính
-          </Text>
+        <View className="px-4 mb-6">
+          <View className="flex-row items-center gap-2 mb-1">
+            <View className="w-1.5 h-6 rounded-full bg-primary" />
+            <Text className="font-bold text-xl text-foreground flex-1">
+              Dịch vụ chính
+            </Text>
+            {selectedService ? (
+              <TouchableOpacity
+                onPress={() => {
+                  setSelectedServiceId("");
+                  setAddOnServiceIds([]);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text className="text-primary text-sm font-medium">
+                  Thay đổi
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
           {selectedVehicleId ? (
-            <Text className="text-xs text-muted-foreground mb-2">
+            <Text className="text-xs text-muted-foreground mb-3 ml-3.5">
               Đang lọc theo{" "}
-              {selectedVehicle?.vehicle_type === "CAR" ? "ô tô" : "xe máy"}.
+              {selectedVehicle?.vehicle_type === "CAR" ? "ô tô" : "xe máy"} của bạn
             </Text>
           ) : (
-            <Text className="text-xs text-muted-foreground mb-2">
-              Chọn phương tiện trước để lọc dịch vụ phù hợp.
+            <Text className="text-xs text-muted-foreground mb-3 ml-3.5">
+              Chọn phương tiện trước để lọc dịch vụ phù hợp
             </Text>
           )}
 
@@ -560,38 +632,58 @@ export default function BookingScreen() {
               </Text>
             </View>
           ) : (
-            <View className="gap-3">
+            <View className="gap-2.5">
               {compatibleMainServices.map((service) => {
                 const selected = service.id === selectedServiceId;
                 return (
                   <TouchableOpacity
                     key={service.id}
+                    activeOpacity={0.8}
                     onPress={() => {
                       setSelectedServiceId(service.id);
                       setAddOnServiceIds([]);
                     }}
-                    className={`rounded-xl border bg-card p-4 ${
-                      selected ? "border-primary border-2" : "border-border"
+                    className={`flex-row items-center gap-3 bg-card rounded-xl border-2 px-4 py-3 ${
+                      selected ? "border-primary" : "border-border"
                     }`}
                   >
-                    <View className="flex-row items-start justify-between gap-3">
-                      <View className="flex-1">
-                        <Text className="text-base font-semibold text-foreground">
-                          {service.name}
-                        </Text>
-                        <Text className="text-sm text-muted-foreground mt-1">
-                          {service.description ?? `${service.duration_minutes} phút`}
-                        </Text>
-                        <Text className="text-xs text-muted-foreground mt-1">
-                          {service.vehicle_type === "CAR" ? "Dành cho ô tô" : "Dành cho xe máy"} •{" "}
-                          {service.duration_minutes} phút
-                        </Text>
-                      </View>
-                      <Text className="text-base font-bold text-primary">
+                    <View className="flex-1">
+                      <Text
+                        className="font-semibold text-sm text-foreground leading-tight"
+                        numberOfLines={1}
+                      >
+                        {service.name}
+                      </Text>
+                      <Text
+                        className="text-xs text-muted-foreground mt-1"
+                        numberOfLines={2}
+                      >
+                        {service.description ??
+                          `${service.duration_minutes} phút`}
+                      </Text>
+                      <Text className="text-xs text-muted-foreground mt-1">
+                        {service.vehicle_type === "CAR"
+                          ? "Dành cho ô tô"
+                          : "Dành cho xe máy"}
+                        {" • "}
+                        {service.duration_minutes} phút
+                      </Text>
+                    </View>
+                    <View className="items-end gap-2">
+                      <Text className="font-bold text-sm text-primary">
                         {selected && quotedPriceByServiceId.has(service.id)
-                          ? formatCurrency(quotedPriceByServiceId.get(service.id) ?? 0)
+                          ? formatCurrency(
+                              quotedPriceByServiceId.get(service.id) ?? 0
+                            )
                           : `Từ ${formatCurrency(service.base_price)}`}
                       </Text>
+                      {selected ? (
+                        <View className="w-6 h-6 rounded-full bg-primary items-center justify-center">
+                          <Check size={13} color="#ffffff" strokeWidth={3} />
+                        </View>
+                      ) : (
+                        <View className="w-6 h-6 rounded-full border-2 border-border" />
+                      )}
                     </View>
                   </TouchableOpacity>
                 );
@@ -602,12 +694,27 @@ export default function BookingScreen() {
 
         {/* 3b. Chọn add-on (tick) */}
         {selectedServiceId && (
-          <View className="px-4 mb-4">
-            <Text className="text-lg font-bold text-foreground mb-1">
-              Dịch vụ thêm (tuỳ chọn)
-            </Text>
-            <Text className="text-xs text-muted-foreground mb-2">
-              Tick chọn những dịch vụ cộng thêm. Có thể chọn nhiều.
+          <View className="px-4 mb-6">
+            <View className="flex-row items-center gap-2 mb-1">
+              <View className="w-1.5 h-6 rounded-full bg-primary" />
+              <Text className="font-bold text-xl text-foreground flex-1">
+                Dịch vụ thêm
+              </Text>
+              {addOnServiceIds.length > 0 ? (
+                <TouchableOpacity
+                  onPress={() => setAddOnServiceIds([])}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Text className="text-primary text-sm font-medium">
+                    Bỏ chọn
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <Text className="text-xs text-muted-foreground">Tùy chọn</Text>
+              )}
+            </View>
+            <Text className="text-xs text-muted-foreground mb-3 ml-3.5">
+              Tùy chọn thêm để nâng cấp dịch vụ, có thể chọn nhiều
             </Text>
 
             {availableAddOns.length === 0 ? (
@@ -617,28 +724,31 @@ export default function BookingScreen() {
                 </Text>
               </View>
             ) : (
-              <View className="gap-2">
+              <View className="gap-2.5">
                 {availableAddOns.map((addon) => {
                   const checked = addOnServiceIds.includes(addon.id);
                   return (
                     <TouchableOpacity
                       key={addon.id}
+                      activeOpacity={0.8}
                       onPress={() => handleToggleAddOn(addon.id)}
-                      className={`flex-row items-center gap-3 rounded-xl border bg-card p-3 ${
-                        checked ? "border-primary border-2" : "border-border"
+                      className={`flex-row items-center gap-3 bg-card rounded-xl border-2 px-4 py-3 ${
+                        checked ? "border-primary" : "border-border"
                       }`}
                     >
-                      {checked ? (
-                        <CheckSquare size={20} color="#1a5fd4" strokeWidth={2.4} />
-                      ) : (
-                        <Square size={20} color="#7a8599" strokeWidth={2.4} />
-                      )}
                       <View className="flex-1">
-                        <Text className="text-sm font-semibold text-foreground">
+                        <Text
+                          className="font-semibold text-sm text-foreground"
+                          numberOfLines={1}
+                        >
                           {addon.name}
                         </Text>
-                        <Text className="text-xs text-muted-foreground mt-0.5">
-                          {addon.description ?? `${addon.duration_minutes} phút`}
+                        <Text
+                          className="text-xs text-muted-foreground mt-0.5"
+                          numberOfLines={1}
+                        >
+                          {addon.description ??
+                            `${addon.duration_minutes} phút`}
                         </Text>
                       </View>
                       <Text className="text-sm font-bold text-primary">
@@ -648,6 +758,13 @@ export default function BookingScreen() {
                             )}`
                           : `Từ ${formatCurrency(addon.base_price)}`}
                       </Text>
+                      {checked ? (
+                        <View className="w-6 h-6 rounded bg-primary items-center justify-center">
+                          <CheckSquare size={14} color="#ffffff" strokeWidth={3} />
+                        </View>
+                      ) : (
+                        <View className="w-6 h-6 rounded border-2 border-border" />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -714,81 +831,105 @@ export default function BookingScreen() {
       </ScrollView>
 
       {/* Footer */}
-      <View className="bg-card border-t border-border flex-row items-center justify-between px-4 py-3">
-        <View>
-          <Text className="text-xs text-muted-foreground">Tổng tạm tính</Text>
-          <Text className="text-lg font-bold text-primary">
-            {quoteLoading
-              ? "Đang tính..."
-              : priceQuote
-                ? formatCurrency(totalPrice)
-                : "Chưa có báo giá"}
-          </Text>
-          {quoteError ? (
-            <Text className="text-xs text-red-600 mt-0.5">{quoteError}</Text>
-          ) : null}
-          {addOnServiceIds.length > 0 && (
-            <Text className="text-xs text-muted-foreground">
-              Đã chọn {addOnServiceIds.length} dịch vụ thêm
+      <View
+        className="bg-card border-t border-border px-4 pt-3 pb-4"
+        style={{
+          shadowColor: "#000",
+          shadowOffset: { width: 0, height: -2 },
+          shadowOpacity: 0.05,
+          shadowRadius: 6,
+          elevation: 8,
+        }}
+      >
+        <View className="flex-row items-center justify-between">
+          <View className="flex-1">
+            <Text className="text-[11px] text-muted-foreground">
+              Tổng tạm tính
             </Text>
-          )}
-        </View>
-        <TouchableOpacity
-          disabled={!canContinue}
-          onPress={() => {
-            if (!isAuthenticated) {
-              router.push("/login");
-              return;
-            }
+            <Text className="text-xl font-extrabold text-primary mt-0.5">
+              {quoteLoading
+                ? "Đang tính..."
+                : priceQuote
+                  ? formatCurrency(totalPrice)
+                  : "Chưa có báo giá"}
+            </Text>
+            {quoteError ? (
+              <Text className="text-xs text-red-600 mt-0.5">{quoteError}</Text>
+            ) : null}
+            {addOnServiceIds.length > 0 ? (
+              <Text className="text-xs text-muted-foreground mt-0.5">
+                Bao gồm {addOnServiceIds.length} dịch vụ thêm
+              </Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            disabled={!canContinue}
+            onPress={() => {
+              if (!isAuthenticated) {
+                router.push("/login");
+                return;
+              }
 
-            if (
-              !selectedVehicle ||
-              !selectedService ||
-              !selectedGarage ||
-              !selectedSlot ||
-              !priceQuote
-            ) {
-              Alert.alert(
-                "Thiếu thông tin",
-                "Vui lòng chọn garage, phương tiện, dịch vụ và khung giờ."
-              );
-              return;
-            }
+              if (
+                !selectedVehicle ||
+                !selectedService ||
+                !selectedGarage ||
+                !selectedSlot ||
+                !priceQuote
+              ) {
+                Alert.alert(
+                  "Thiếu thông tin",
+                  "Vui lòng chọn garage, phương tiện, dịch vụ và khung giờ."
+                );
+                return;
+              }
 
-            router.push({
-              pathname: "/payment",
-              params: {
-                garageId: selectedGarage.id,
-                garageName: selectedGarage.name,
-                servicePackageId: selectedService.id,
-                serviceName: selectedService.name,
-                vehicleId: selectedVehicle.id,
-                vehicleName: toVehicleName(selectedVehicle),
-                vehiclePlate: selectedVehicle.raw_license_plate,
-                startTime: selectedSlot.start_time,
-                price: String(totalPrice),
-                quoteId: priceQuote.id,
-                addOnIds: addOnServiceIds.join(","),
-              },
-            });
-          }}
-          className={`px-8 py-3 rounded-xl flex-row items-center gap-2 ${
-            canContinue ? "bg-primary" : "bg-muted"
-          }`}
-        >
-          <Text
-            className={`text-base font-semibold ${
-              canContinue ? "text-white" : "text-muted-foreground"
+              router.push({
+                pathname: "/payment",
+                params: {
+                  garageId: selectedGarage.id,
+                  garageName: selectedGarage.name,
+                  servicePackageId: selectedService.id,
+                  serviceName: selectedService.name,
+                  vehicleId: selectedVehicle.id,
+                  vehicleName: toVehicleName(selectedVehicle),
+                  vehiclePlate: selectedVehicle.raw_license_plate,
+                  startTime: selectedSlot.start_time,
+                  price: String(totalPrice),
+                  quoteId: priceQuote.id,
+                  addOnIds: addOnServiceIds.join(","),
+                },
+              });
+            }}
+            className={`px-6 py-3.5 rounded-2xl flex-row items-center gap-2 ${
+              canContinue ? "bg-primary" : "bg-muted"
             }`}
+            style={
+              canContinue
+                ? {
+                    shadowColor: "#1a5fd4",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.3,
+                    shadowRadius: 6,
+                    elevation: 4,
+                  }
+                : undefined
+            }
           >
-            Tiếp tục
-          </Text>
-          <ArrowRight
-            size={18}
-            color={canContinue ? "#ffffff" : "#7a8599"}
-            strokeWidth={2.7}
-          />
-        </TouchableOpacity>
+            <Text
+              className={`text-sm font-bold ${
+                canContinue ? "text-white" : "text-muted-foreground"
+              }`}
+            >
+              Tiếp tục
+            </Text>
+            <ArrowRight
+              size={16}
+              color={canContinue ? "#ffffff" : "#7a8599"}
+              strokeWidth={2.8}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
