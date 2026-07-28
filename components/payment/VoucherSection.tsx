@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Text,
@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import {
   Check,
+  Lock,
   Ticket,
   TicketPercent,
   X,
@@ -147,22 +148,98 @@ export default function VoucherSection({
   const [voucherCode, setVoucherCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [customerEligibility, setCustomerEligibility] = useState<
+    Record<string, { ok: boolean; reason?: string }>
+  >({});
+  const [probing, setProbing] = useState(false);
+  const probeSeq = useRef(0);
 
-  const ranked = useMemo(() => {
-    const tagged = promotions.map((promo) => ({
-      promo,
-      check: isPromotionApplicable(
+  // Probe per-customer eligibility cho mỗi mã để biết customer này có dùng
+  // được mã đó hay không. Chỉ probe các mã client-side OK để tiết kiệm
+  // request. Lỗi mạng giữ nguyên trạng thái "không rõ" → không khóa mã.
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setCustomerEligibility({});
+      return;
+    }
+    if (!onValidate || promotions.length === 0) return;
+
+    const seq = ++probeSeq.current;
+    const candidates = promotions.filter((promo) => {
+      const check = isPromotionApplicable(
         promo,
         servicePackageId,
         servicePrice,
         vehicleType
-      ),
-    }));
+      );
+      return check.ok;
+    });
+    if (candidates.length === 0) return;
+
+    setProbing(true);
+
+    const run = async () => {
+      const results: Record<string, { ok: boolean; reason?: string }> = {};
+      await Promise.all(
+        candidates.map(async (promo) => {
+          try {
+            const result = await onValidate(promo.code);
+            if ("error" in result) {
+              results[promo.id] = { ok: false, reason: result.error };
+            } else {
+              results[promo.id] = { ok: true };
+            }
+          } catch {
+            // Bỏ qua lỗi mạng — coi như không rõ
+          }
+        })
+      );
+      if (seq === probeSeq.current) {
+        setCustomerEligibility(results);
+        setProbing(false);
+      }
+    };
+
+    void run();
+
+    return () => {
+      // Invalidate stale probe khi servicePackageId/vehicleType/promotions đổi
+    };
+  }, [
+    isAuthenticated,
+    promotions,
+    servicePackageId,
+    servicePrice,
+    vehicleType,
+    onValidate,
+  ]);
+
+  const ranked = useMemo(() => {
+    const tagged = promotions.map((promo) => {
+      const clientCheck = isPromotionApplicable(
+        promo,
+        servicePackageId,
+        servicePrice,
+        vehicleType
+      );
+      const perCustomer = customerEligibility[promo.id];
+      // Per-customer fail "thắng" — dùng lý do của nó
+      if (perCustomer && !perCustomer.ok) {
+        return {
+          promo,
+          check: {
+            ok: false,
+            reason: perCustomer.reason ?? "Không áp dụng được cho tài khoản này",
+          },
+        };
+      }
+      return { promo, check: clientCheck };
+    });
     return tagged.sort((a, b) => {
       if (a.check.ok !== b.check.ok) return a.check.ok ? -1 : 1;
       return b.promo.discount_value - a.promo.discount_value;
     });
-  }, [promotions, servicePackageId, servicePrice, vehicleType]);
+  }, [promotions, servicePackageId, servicePrice, vehicleType, customerEligibility]);
 
   const visible = expanded ? ranked : ranked.slice(0, 3);
 
@@ -304,7 +381,11 @@ export default function VoucherSection({
           <View className="gap-2">
             {visible.map(({ promo, check }) => {
               const isApplied = applied?.promotion.id === promo.id;
-              const disabled = !check.ok || submitting;
+              const lockedByOther = Boolean(applied) && !isApplied;
+              const disabled = !check.ok || submitting || lockedByOther;
+              const perCustomerFail =
+                customerEligibility[promo.id] &&
+                !customerEligibility[promo.id].ok;
               return (
                 <TouchableOpacity
                   key={promo.id}
@@ -318,10 +399,18 @@ export default function VoucherSection({
                   className={`rounded-xl px-3 py-3 flex-row items-center gap-3 border ${
                     isApplied
                       ? "border-2 border-primary bg-secondary"
-                      : disabled
-                        ? "border-border bg-muted/40 opacity-60"
-                        : "border-border bg-card"
+                      : lockedByOther
+                        ? "border-border bg-muted/40 opacity-50"
+                        : !check.ok
+                          ? "border-border bg-muted/40 opacity-60"
+                          : "border-border bg-card"
                   }`}
+                  accessibilityState={{ disabled }}
+                  accessibilityLabel={
+                    !check.ok
+                      ? `Mã ${promo.code} không thể sử dụng: ${check.reason}`
+                      : `Áp dụng mã ${promo.code}`
+                  }
                 >
                   <View
                     className={`w-10 h-10 rounded-lg items-center justify-center ${
@@ -330,13 +419,19 @@ export default function VoucherSection({
                   >
                     {isApplied ? (
                       <Check size={18} color="#ffffff" strokeWidth={3} />
+                    ) : !check.ok ? (
+                      <Lock size={16} color="#7a8599" strokeWidth={2.6} />
                     ) : (
-                      <Ticket size={18} color="#1a56db" strokeWidth={2.4} />
+                      <Ticket size={18} color="#1a5fd4" strokeWidth={2.4} />
                     )}
                   </View>
                   <View className="flex-1">
                     <View className="flex-row items-center gap-2">
-                      <Text className="text-sm font-bold text-foreground">
+                      <Text
+                        className={`text-sm font-bold ${
+                          isApplied ? "text-primary" : "text-foreground"
+                        }`}
+                      >
                         {promo.code}
                       </Text>
                       <View className="rounded-full bg-secondary px-2 py-0.5">
@@ -353,13 +448,28 @@ export default function VoucherSection({
                     </Text>
                     <Text
                       className={`text-[11px] mt-0.5 ${
-                        check.ok ? "text-muted-foreground" : "text-danger"
+                        lockedByOther
+                          ? "text-muted-foreground italic"
+                          : check.ok
+                            ? "text-muted-foreground"
+                            : "text-danger"
                       }`}
                       numberOfLines={1}
                     >
-                      {check.ok ? formatExpiry(promo) : check.reason}
+                      {lockedByOther
+                        ? "Bỏ chọn mã hiện tại để đổi"
+                        : check.ok
+                          ? formatExpiry(promo)
+                          : check.reason}
                     </Text>
                   </View>
+                  {perCustomerFail ? (
+                    <View className="self-start rounded-md bg-muted px-1.5 py-0.5">
+                      <Text className="text-[9px] font-bold text-muted-foreground tracking-wide">
+                        KHÔNG DÙNG ĐƯỢC
+                      </Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
