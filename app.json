@@ -18,8 +18,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "useNextNotificationsApi": true,
-      "permissions": ["android.permission.POST_NOTIFICATIONS"]
+      "permissions": ["android.permission.POST_NOTIFICATIONS"],
+      "package": "com.anonymous.carwash"
     },
     "web": {
       "favicon": "./assets/favicon.png"

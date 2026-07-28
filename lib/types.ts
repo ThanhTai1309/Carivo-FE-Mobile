@@ -121,6 +121,41 @@ export interface ServicePackage {
   discount_percentage?: number | null;
 }
 
+export interface PriceQuote {
+  id: string;
+  garage_id: string;
+  vehicle_id: string | null;
+  vehicle_snapshot: {
+    vehicle_type: VehicleType;
+    engine_type: EngineType | null;
+    motorbike_cc_group: "UNDER_175CC" | "OVER_175CC" | null;
+    car_body_type:
+      | "HATCHBACK"
+      | "SEDAN"
+      | "SUV"
+      | "MPV"
+      | "PICKUP"
+      | "VAN"
+      | null;
+    seat_count: number | null;
+  };
+  service_package_id: string;
+  add_on_service_ids: string[];
+  items: Array<{
+    service_package_id: string;
+    service_price_rule_id: string | null;
+    rule_version: number | null;
+    source: "PRIMARY" | "ADD_ON";
+    name_snapshot: string;
+    price_snapshot: number;
+    duration_minutes: number;
+  }>;
+  subtotal: number;
+  total_duration_minutes: number;
+  effective_at: string;
+  expires_at: string;
+}
+
 export type PromotionDiscountType = "PERCENTAGE" | "FIXED_AMOUNT";
 
 export interface Promotion {

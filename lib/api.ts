@@ -20,6 +20,7 @@ import type {
   LoyaltyTransaction,
   NotificationItem,
   PaymentTransaction,
+  PriceQuote,
   PhoneVerificationChallenge,
   PhoneVerificationToken,
   Promotion,
@@ -260,7 +261,8 @@ export const api = {
   validatePromotion(
     token: string,
     promotionCode: string,
-    servicePackageId: string
+    servicePackageId: string,
+    quoteId?: string
   ) {
     return request<
       ApiEnvelope<{
@@ -274,6 +276,7 @@ export const api = {
       body: {
         promotion_code: promotionCode,
         service_package_id: servicePackageId,
+        quote_id: quoteId,
       },
     });
   },
@@ -293,6 +296,23 @@ export const api = {
     return request<ApiEnvelope<AvailableSlotsPayload>>("/bookings/available-slots", {
       query: params,
       token,
+    });
+  },
+
+  createPriceQuote(
+    token: string,
+    body: {
+      garage_id: string;
+      vehicle_id: string;
+      service_package_id: string;
+      add_on_service_ids?: string[];
+      effective_at?: string;
+    }
+  ) {
+    return request<ApiEnvelope<PriceQuote>>("/pricing/quotes", {
+      method: "POST",
+      token,
+      body,
     });
   },
 
@@ -358,6 +378,7 @@ export const api = {
       vehicle_id: string;
       service_package_id: string;
       add_on_service_ids?: string[];
+      quote_id?: string;
       start_time: string;
       promotion_code?: string;
       voucher_code?: string;
@@ -401,6 +422,7 @@ export const api = {
     token: string,
     body: {
       service_package_id: string;
+      quote_id?: string;
       promotion_id?: string;
       promotion_code?: string;
       voucher_code?: string;
@@ -561,7 +583,8 @@ export const api = {
   validateVoucher(
     token: string,
     voucherCode: string,
-    servicePackageId: string
+    servicePackageId: string,
+    quoteId?: string
   ) {
     return request<
       ApiEnvelope<{
@@ -573,8 +596,9 @@ export const api = {
       method: "POST",
       token,
       body: {
-        voucher_code: voucherCode,
+        code: voucherCode,
         service_package_id: servicePackageId,
+        quote_id: quoteId,
       },
     });
   },

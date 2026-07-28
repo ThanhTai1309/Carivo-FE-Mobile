@@ -31,6 +31,7 @@ import { addDays, formatCurrency, toDateInputValue } from "@/lib/format";
 import type {
   AvailableSlot,
   Garage,
+  PriceQuote,
   ServicePackage,
   Vehicle,
 } from "@/lib/types";
@@ -69,6 +70,9 @@ export default function BookingScreen() {
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [priceQuote, setPriceQuote] = useState<PriceQuote | null>(null);
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteError, setQuoteError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const dateOptions = useMemo(
@@ -104,11 +108,6 @@ export default function BookingScreen() {
   }, [mainServices, selectedVehicle]);
 
   const selectedService = services.find((service) => service.id === selectedServiceId);
-
-  const selectedAddOns = useMemo(
-    () => services.filter((s) => addOnServiceIds.includes(s.id)),
-    [services, addOnServiceIds]
-  );
 
   const loadBootData = async () => {
     try {
@@ -246,6 +245,66 @@ export default function BookingScreen() {
     addOnServiceIds,
   ]);
 
+  useEffect(() => {
+    if (
+      !accessToken ||
+      !selectedGarageId ||
+      !selectedVehicleId ||
+      !selectedServiceId
+    ) {
+      setPriceQuote(null);
+      setQuoteLoading(false);
+      setQuoteError(null);
+      return;
+    }
+
+    setPriceQuote(null);
+    setQuoteLoading(true);
+    setQuoteError(null);
+
+    let cancelled = false;
+    const timeoutId = setTimeout(async () => {
+      try {
+        const response = await api.createPriceQuote(accessToken, {
+          garage_id: selectedGarageId,
+          vehicle_id: selectedVehicleId,
+          service_package_id: selectedServiceId,
+          add_on_service_ids:
+            addOnServiceIds.length > 0 ? addOnServiceIds : undefined,
+          effective_at: selectedSlot?.start_time,
+        });
+        if (!cancelled) {
+          setPriceQuote(response.data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setPriceQuote(null);
+          setQuoteError(
+            error instanceof ApiError
+              ? error.message
+              : "Không có bảng giá phù hợp với phân loại xe này."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setQuoteLoading(false);
+        }
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    accessToken,
+    selectedGarageId,
+    selectedVehicleId,
+    selectedServiceId,
+    addOnServiceIds,
+    selectedSlot?.start_time,
+  ]);
+
   const handleJoinWaitlist = useCallback(async () => {
     if (!accessToken) {
       router.push("/login");
@@ -325,11 +384,20 @@ export default function BookingScreen() {
     order: index,
   }));
 
-  const basePrice = selectedService?.base_price ?? 0;
-  const addOnTotal = selectedAddOns.reduce((sum, s) => sum + (s.base_price ?? 0), 0);
-
-  const totalPrice = basePrice + addOnTotal;
-  const canContinue = Boolean(selectedGarage && selectedService && selectedSlot);
+  const totalPrice = priceQuote?.subtotal ?? 0;
+  const canContinue = Boolean(
+    selectedGarage &&
+      selectedService &&
+      selectedSlot &&
+      priceQuote &&
+      !quoteLoading
+  );
+  const quotedPriceByServiceId = new Map(
+    (priceQuote?.items ?? []).map((item) => [
+      item.service_package_id,
+      item.price_snapshot,
+    ])
+  );
 
   const handleToggleAddOn = (id: string) => {
     setAddOnServiceIds((current) =>
@@ -520,7 +588,9 @@ export default function BookingScreen() {
                         </Text>
                       </View>
                       <Text className="text-base font-bold text-primary">
-                        {formatCurrency(service.base_price)}
+                        {selected && quotedPriceByServiceId.has(service.id)
+                          ? formatCurrency(quotedPriceByServiceId.get(service.id) ?? 0)
+                          : `Từ ${formatCurrency(service.base_price)}`}
                       </Text>
                     </View>
                   </TouchableOpacity>
@@ -572,7 +642,11 @@ export default function BookingScreen() {
                         </Text>
                       </View>
                       <Text className="text-sm font-bold text-primary">
-                        +{formatCurrency(addon.base_price)}
+                        {checked && quotedPriceByServiceId.has(addon.id)
+                          ? `+${formatCurrency(
+                              quotedPriceByServiceId.get(addon.id) ?? 0
+                            )}`
+                          : `Từ ${formatCurrency(addon.base_price)}`}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -644,8 +718,15 @@ export default function BookingScreen() {
         <View>
           <Text className="text-xs text-muted-foreground">Tổng tạm tính</Text>
           <Text className="text-lg font-bold text-primary">
-            {formatCurrency(totalPrice)}
+            {quoteLoading
+              ? "Đang tính..."
+              : priceQuote
+                ? formatCurrency(totalPrice)
+                : "Chưa có báo giá"}
           </Text>
+          {quoteError ? (
+            <Text className="text-xs text-red-600 mt-0.5">{quoteError}</Text>
+          ) : null}
           {addOnServiceIds.length > 0 && (
             <Text className="text-xs text-muted-foreground">
               Đã chọn {addOnServiceIds.length} dịch vụ thêm
@@ -660,7 +741,13 @@ export default function BookingScreen() {
               return;
             }
 
-            if (!selectedVehicle || !selectedService || !selectedGarage || !selectedSlot) {
+            if (
+              !selectedVehicle ||
+              !selectedService ||
+              !selectedGarage ||
+              !selectedSlot ||
+              !priceQuote
+            ) {
               Alert.alert(
                 "Thiếu thông tin",
                 "Vui lòng chọn garage, phương tiện, dịch vụ và khung giờ."
@@ -680,6 +767,7 @@ export default function BookingScreen() {
                 vehiclePlate: selectedVehicle.raw_license_plate,
                 startTime: selectedSlot.start_time,
                 price: String(totalPrice),
+                quoteId: priceQuote.id,
                 addOnIds: addOnServiceIds.join(","),
               },
             });

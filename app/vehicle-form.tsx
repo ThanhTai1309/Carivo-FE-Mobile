@@ -187,15 +187,38 @@ export default function VehicleFormScreen() {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const setVehicleType = (vehicleType: VehicleType) => {
+    setForm((prev) => ({
+      ...prev,
+      vehicle_type: vehicleType,
+      motorbike_cc_group:
+        vehicleType === "MOTORBIKE" ? prev.motorbike_cc_group : undefined,
+      car_body_type: vehicleType === "CAR" ? prev.car_body_type : undefined,
+      seat_count: vehicleType === "CAR" ? prev.seat_count : "",
+    }));
+  };
+
   const validate = (): boolean => {
     if (!form.raw_license_plate.trim()) {
       Alert.alert("Thiếu thông tin", "Vui lòng nhập biển số xe.");
       return false;
     }
-    if (form.vehicle_type === "CAR" && form.seat_count) {
+    if (form.vehicle_type === "MOTORBIKE" && !form.motorbike_cc_group) {
+      Alert.alert("Thiếu thông tin", "Vui lòng chọn phân khúc xe máy.");
+      return false;
+    }
+    if (form.vehicle_type === "CAR") {
+      if (!form.car_body_type) {
+        Alert.alert("Thiếu thông tin", "Vui lòng chọn kiểu dáng ô tô.");
+        return false;
+      }
+      if (!form.seat_count) {
+        Alert.alert("Thiếu thông tin", "Vui lòng nhập số chỗ ngồi.");
+        return false;
+      }
       const n = parseInt(form.seat_count, 10);
-      if (isNaN(n) || n < 2 || n > 50) {
-        Alert.alert("Số chỗ không hợp lệ", "Số chỗ ngồi phải từ 2 đến 50.");
+      if (isNaN(n) || n < 2 || n > 16) {
+        Alert.alert("Số chỗ không hợp lệ", "Số chỗ ngồi phải từ 2 đến 16.");
         return false;
       }
     }
@@ -217,16 +240,10 @@ export default function VehicleFormScreen() {
       };
 
       if (form.vehicle_type === "MOTORBIKE") {
-        if (form.motorbike_cc_group) {
-          payload.motorbike_cc_group = form.motorbike_cc_group;
-        }
+        payload.motorbike_cc_group = form.motorbike_cc_group;
       } else {
-        if (form.car_body_type) {
-          payload.car_body_type = form.car_body_type;
-        }
-        if (form.seat_count) {
-          payload.seat_count = parseInt(form.seat_count, 10);
-        }
+        payload.car_body_type = form.car_body_type;
+        payload.seat_count = parseInt(form.seat_count || "", 10);
       }
 
       if (isEditMode && id) {
@@ -330,7 +347,7 @@ export default function VehicleFormScreen() {
                 { label: "Xe máy", value: "MOTORBIKE" as VehicleType },
               ]}
               value={form.vehicle_type}
-              onChange={(v) => setField("vehicle_type", v)}
+              onChange={setVehicleType}
             />
           </FormField>
 
@@ -351,7 +368,7 @@ export default function VehicleFormScreen() {
             <FormField label="Phân khúc" required>
               <SegmentedControl
                 options={MOTORBIKE_CC_OPTIONS}
-                value={form.motorbike_cc_group ?? "UNDER_175CC"}
+                value={form.motorbike_cc_group ?? ("" as MotorbikeCC)}
                 onChange={(v) => setField("motorbike_cc_group", v)}
               />
             </FormField>
@@ -360,21 +377,14 @@ export default function VehicleFormScreen() {
           {/* Kiểu dáng ô tô */}
           {form.vehicle_type === "CAR" && (
             <>
-              <FormField label="Kiểu dáng">
+              <FormField label="Kiểu dáng" required>
                 <View className="flex-row flex-wrap gap-2">
                   {CAR_BODY_OPTIONS.map((opt) => {
                     const active = form.car_body_type === opt.value;
                     return (
                       <TouchableOpacity
                         key={opt.value}
-                        onPress={() =>
-                          setField(
-                            "car_body_type",
-                            form.car_body_type === opt.value
-                              ? (undefined as unknown as CarBody)
-                              : opt.value
-                          )
-                        }
+                        onPress={() => setField("car_body_type", opt.value)}
                         className={`rounded-xl border px-4 py-2.5 ${
                           active
                             ? "bg-primary border-primary"
@@ -395,7 +405,7 @@ export default function VehicleFormScreen() {
               </FormField>
 
               {/* Số chỗ */}
-              <FormField label="Số chỗ ngồi">
+              <FormField label="Số chỗ ngồi" required>
                 <TextInputField
                   placeholder="VD: 5"
                   value={form.seat_count ?? ""}

@@ -45,6 +45,7 @@ export default function PaymentScreen() {
     vehiclePlate?: string;
     startTime?: string;
     price?: string;
+    quoteId?: string;
     addOnIds?: string;
   }>();
   const { accessToken, isAuthenticated } = useApp();
@@ -63,6 +64,7 @@ export default function PaymentScreen() {
   const [promoDiscount, setPromoDiscount] = useState(0);
   const [voucherDiscount, setVoucherDiscount] = useState(0);
   const [pointsDiscount, setPointsDiscount] = useState(0);
+  const [appliedPoints, setAppliedPoints] = useState(0);
   const [currentPoints, setCurrentPoints] = useState(0);
   const [pointMultiplier, setPointMultiplier] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -139,14 +141,20 @@ export default function PaymentScreen() {
   useEffect(() => {
     setPromoDiscount(0);
     setVoucherDiscount(0);
+    setPointsDiscount(0);
+    setAppliedPoints(0);
+    setUsedPoints("0");
     setAppliedPromo(null);
     setAppliedVoucher(null);
-  }, [params.servicePackageId]);
+  }, [params.quoteId, params.servicePackageId]);
 
   const handleAppliedChange = useCallback(
     (next: AppliedPromotion | null) => {
       setAppliedPromo(next);
       setPromoDiscount(next?.discountAmount ?? 0);
+      setPointsDiscount(0);
+      setAppliedPoints(0);
+      setUsedPoints("0");
     },
     []
   );
@@ -162,7 +170,8 @@ export default function PaymentScreen() {
         const response = await api.validatePromotion(
           accessToken,
           promotionCode,
-          params.servicePackageId
+          params.servicePackageId,
+          params.quoteId
         );
         const promo = response.data.promotion;
         const discount = response.data.discount_amount ?? 0;
@@ -182,7 +191,7 @@ export default function PaymentScreen() {
         return { error: message };
       }
     },
-    [accessToken, params.servicePackageId, basePrice]
+    [accessToken, params.servicePackageId, params.quoteId, basePrice]
   );
 
   const handleValidateVoucher = useCallback(
@@ -203,7 +212,8 @@ export default function PaymentScreen() {
         const response = await api.validateVoucher(
           accessToken,
           trimmed.toUpperCase(),
-          params.servicePackageId
+          params.servicePackageId,
+          params.quoteId
         );
         const voucher = response.data?.voucher;
         const discount = response.data?.discount_amount ?? 0;
@@ -224,13 +234,16 @@ export default function PaymentScreen() {
         return { error: message };
       }
     },
-    [accessToken, params.servicePackageId]
+    [accessToken, params.servicePackageId, params.quoteId]
   );
 
   const handleVoucherChange = useCallback(
     (next: AppliedVoucher | null) => {
       setAppliedVoucher(next);
       setVoucherDiscount(next?.discountAmount ?? 0);
+      setPointsDiscount(0);
+      setAppliedPoints(0);
+      setUsedPoints("0");
     },
     []
   );
@@ -295,6 +308,7 @@ export default function PaymentScreen() {
     try {
       const response = await api.redeemPreview(accessToken, {
         service_package_id: params.servicePackageId,
+        quote_id: params.quoteId,
         promotion_code: appliedPromo?.promotion.code,
         voucher_code: appliedVoucher?.code,
         used_points: points,
@@ -303,11 +317,13 @@ export default function PaymentScreen() {
       const discountFromBe =
         basePrice - promoDiscount - voucherDiscount - finalPrice;
       setPointsDiscount(Math.max(0, discountFromBe));
+      setAppliedPoints(points);
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Không thể áp điểm.";
       Alert.alert("Không thể áp điểm", message);
       setPointsDiscount(0);
+      setAppliedPoints(0);
     }
   };
 
@@ -363,7 +379,8 @@ export default function PaymentScreen() {
       !params.garageId ||
       !params.servicePackageId ||
       !params.vehicleId ||
-      !params.startTime
+      !params.startTime ||
+      !params.quoteId
     ) {
       Alert.alert("Thiếu dữ liệu", "Thiếu thông tin booking để xác nhận.");
       return;
@@ -389,10 +406,11 @@ export default function PaymentScreen() {
         vehicle_id: params.vehicleId,
         service_package_id: params.servicePackageId,
         add_on_service_ids: addOnServiceIds,
+        quote_id: params.quoteId,
         start_time: params.startTime,
         promotion_code: appliedPromo?.promotion.code,
         voucher_code: appliedVoucher?.code,
-        used_points: Number(usedPoints || 0) || undefined,
+        used_points: appliedPoints || undefined,
         note: noteText,
       });
 
@@ -463,7 +481,12 @@ export default function PaymentScreen() {
 
   const vehicleType: VehicleType | undefined = vehicle?.vehicle_type;
 
-  if (!params.servicePackageId || !params.garageId || !params.startTime) {
+  if (
+    !params.servicePackageId ||
+    !params.garageId ||
+    !params.startTime ||
+    !params.quoteId
+  ) {
     return (
       <SafeAreaView className="flex-1 bg-background">
         <ScreenState
@@ -533,7 +556,11 @@ export default function PaymentScreen() {
             <View className="flex-row gap-2">
               <TextInput
                 value={usedPoints}
-                onChangeText={setUsedPoints}
+                onChangeText={(value) => {
+                  setUsedPoints(value);
+                  setPointsDiscount(0);
+                  setAppliedPoints(0);
+                }}
                 keyboardType="number-pad"
                 placeholder="0"
                 placeholderTextColor="#94a3b8"
