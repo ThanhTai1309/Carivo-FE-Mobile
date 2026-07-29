@@ -574,7 +574,7 @@ export const api = {
     token: string,
     query?: Record<string, QueryValue> & { status?: VoucherStatus }
   ) {
-    return request<ApiEnvelope<CustomerVoucher[]>>("/customer-vouchers/my", {
+    return request<ApiEnvelope<CustomerVoucher[]>>("/customer-vouchers", {
       token,
       query,
     });
