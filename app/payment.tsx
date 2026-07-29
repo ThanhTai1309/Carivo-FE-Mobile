@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
-  Linking,
   ScrollView,
   Text,
   TextInput,
@@ -11,11 +10,10 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, ArrowRight, ExternalLink } from "lucide-react-native";
+import { ArrowLeft, ArrowRight, Clock3 } from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookingInfoCard from "@/components/payment/BookingInfoCard";
 import LoadingButton from "@/components/common/LoadingButton";
-import PaymentMethodList from "@/components/payment/PaymentMethodList";
 import PriceSummary from "@/components/payment/PriceSummary";
 import VoucherSection, {
   type AppliedPromotion,
@@ -31,7 +29,14 @@ import { useApp } from "@/providers/AppProvider";
 const AVATAR =
   "https://storage.googleapis.com/banani-avatars/avatar/male/25-35/East Asian/0";
 
-type SelectedPayment = "payos" | "cash";
+interface PricingPreview {
+  original_price?: number;
+  promotion_discount_amount?: number;
+  used_points?: number;
+  points_discount_amount?: number;
+  discount_amount?: number;
+  final_price?: number;
+}
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -49,9 +54,6 @@ export default function PaymentScreen() {
     addOnIds?: string;
   }>();
   const { accessToken, isAuthenticated } = useApp();
-  const [selectedPayment, setSelectedPayment] = useState<SelectedPayment>(
-    "payos"
-  );
   const [usedPoints, setUsedPoints] = useState("0");
   const [submitting, setSubmitting] = useState(false);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -61,20 +63,48 @@ export default function PaymentScreen() {
   const [appliedVoucher, setAppliedVoucher] = useState<AppliedVoucher | null>(
     null
   );
-  const [promoDiscount, setPromoDiscount] = useState(0);
-  const [voucherDiscount, setVoucherDiscount] = useState(0);
-  const [pointsDiscount, setPointsDiscount] = useState(0);
   const [appliedPoints, setAppliedPoints] = useState(0);
   const [currentPoints, setCurrentPoints] = useState(0);
   const [pointMultiplier, setPointMultiplier] = useState(1);
   const [loading, setLoading] = useState(true);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
-
-  const basePrice = Number(params.price ?? 0);
-  const total = Math.max(
-    0,
-    basePrice - promoDiscount - voucherDiscount - pointsDiscount
+  const [pricingPreview, setPricingPreview] = useState<PricingPreview | null>(
+    null
   );
+  const [pricingLoading, setPricingLoading] = useState(false);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const pricingRequestRef = useRef(0);
+
+  const rawBasePrice = Number(params.price ?? 0);
+  const basePrice =
+    Number.isFinite(rawBasePrice) && rawBasePrice > 0 ? rawBasePrice : 0;
+  const promoDiscount =
+    pricingPreview?.promotion_discount_amount ??
+    appliedPromo?.discountAmount ??
+    0;
+  const pointsDiscount = pricingPreview?.points_discount_amount ?? 0;
+  const previewDiscount = pricingPreview?.discount_amount;
+  const displayBasePrice = pricingPreview?.original_price ?? basePrice;
+  const voucherDiscount =
+    previewDiscount !== undefined
+      ? Math.max(0, previewDiscount - promoDiscount - pointsDiscount)
+      : appliedVoucher?.discountAmount ?? 0;
+  const total =
+    pricingPreview?.final_price ??
+    Math.max(
+      0,
+      displayBasePrice - promoDiscount - voucherDiscount - pointsDiscount
+    );
+  const enteredPoints = Number(usedPoints || 0);
+  const hasUnappliedPoints =
+    Number.isInteger(enteredPoints) &&
+    enteredPoints > 0 &&
+    enteredPoints !== appliedPoints;
+  const hasBenefits = Boolean(appliedPromo || appliedVoucher || appliedPoints);
+  const pricingBlocked =
+    hasUnappliedPoints ||
+    (hasBenefits &&
+      (pricingLoading || !pricingPreview || Boolean(pricingError)));
   const estimatedEarnedPoints = Math.max(
     0,
     Math.round((total / 1000) * pointMultiplier)
@@ -139,22 +169,21 @@ export default function PaymentScreen() {
   }, [accessToken, params.vehicleId]);
 
   useEffect(() => {
-    setPromoDiscount(0);
-    setVoucherDiscount(0);
-    setPointsDiscount(0);
     setAppliedPoints(0);
     setUsedPoints("0");
     setAppliedPromo(null);
     setAppliedVoucher(null);
+    setPricingPreview(null);
+    setPricingError(null);
   }, [params.quoteId, params.servicePackageId]);
 
   const handleAppliedChange = useCallback(
     (next: AppliedPromotion | null) => {
       setAppliedPromo(next);
-      setPromoDiscount(next?.discountAmount ?? 0);
-      setPointsDiscount(0);
       setAppliedPoints(0);
       setUsedPoints("0");
+      setPricingPreview(null);
+      setPricingError(null);
     },
     []
   );
@@ -240,17 +269,90 @@ export default function PaymentScreen() {
   const handleVoucherChange = useCallback(
     (next: AppliedVoucher | null) => {
       setAppliedVoucher(next);
-      setVoucherDiscount(next?.discountAmount ?? 0);
-      setPointsDiscount(0);
       setAppliedPoints(0);
       setUsedPoints("0");
+      setPricingPreview(null);
+      setPricingError(null);
     },
     []
   );
 
+  const loadPricingPreview = useCallback(
+    async (points: number, showError: boolean) => {
+      if (!accessToken || !params.servicePackageId || !params.quoteId) {
+        return null;
+      }
+
+      const requestId = ++pricingRequestRef.current;
+      setPricingLoading(true);
+      setPricingError(null);
+
+      try {
+        const response = await api.redeemPreview(accessToken, {
+          service_package_id: params.servicePackageId,
+          quote_id: params.quoteId,
+          promotion_code: appliedPromo?.promotion.code,
+          voucher_code: appliedVoucher?.code,
+          used_points: points,
+        });
+
+        if (requestId !== pricingRequestRef.current) {
+          return null;
+        }
+
+        setPricingPreview(response.data);
+        return response.data;
+      } catch (error) {
+        if (requestId !== pricingRequestRef.current) {
+          return null;
+        }
+
+        const message =
+          error instanceof ApiError
+            ? error.message
+            : "Không thể xác nhận tổng tiền từ hệ thống.";
+        setPricingPreview(null);
+        setPricingError(message);
+
+        if (showError) {
+          Alert.alert("Không thể áp dụng ưu đãi", message);
+        }
+
+        return null;
+      } finally {
+        if (requestId === pricingRequestRef.current) {
+          setPricingLoading(false);
+        }
+      }
+    },
+    [
+      accessToken,
+      appliedPromo?.promotion.code,
+      appliedVoucher?.code,
+      params.quoteId,
+      params.servicePackageId,
+    ]
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken || !params.quoteId) {
+      return;
+    }
+
+    void loadPricingPreview(appliedPoints, false);
+  }, [
+    accessToken,
+    appliedPoints,
+    appliedPromo?.promotion.code,
+    appliedVoucher?.code,
+    isAuthenticated,
+    loadPricingPreview,
+    params.quoteId,
+  ]);
+
   const priceRows = useMemo(
     () => [
-      { label: "Tạm tính", value: formatCurrency(basePrice) },
+      { label: "Tạm tính", value: formatCurrency(displayBasePrice) },
       {
         label: appliedPromo
           ? `Khuyến mãi (${appliedPromo.promotion.code})`
@@ -283,7 +385,7 @@ export default function PaymentScreen() {
       },
     ],
     [
-      basePrice,
+      displayBasePrice,
       estimatedEarnedPoints,
       pointMultiplier,
       pointsDiscount,
@@ -300,74 +402,22 @@ export default function PaymentScreen() {
     }
 
     const points = Number(usedPoints || 0);
-    if (!Number.isFinite(points) || points < 0) {
+    if (!Number.isInteger(points) || points < 0) {
       Alert.alert("Điểm không hợp lệ", "Vui lòng nhập số điểm hợp lệ.");
       return;
     }
 
-    try {
-      const response = await api.redeemPreview(accessToken, {
-        service_package_id: params.servicePackageId,
-        quote_id: params.quoteId,
-        promotion_code: appliedPromo?.promotion.code,
-        voucher_code: appliedVoucher?.code,
-        used_points: points,
-      });
-      const finalPrice = response.data.final_price ?? basePrice;
-      const discountFromBe =
-        basePrice - promoDiscount - voucherDiscount - finalPrice;
-      setPointsDiscount(Math.max(0, discountFromBe));
-      setAppliedPoints(points);
-    } catch (error) {
-      const message =
-        error instanceof ApiError ? error.message : "Không thể áp điểm.";
-      Alert.alert("Không thể áp điểm", message);
-      setPointsDiscount(0);
-      setAppliedPoints(0);
+    const preview = await loadPricingPreview(points, true);
+    if (preview) {
+      setAppliedPoints(preview.used_points ?? points);
+      return;
+    }
+
+    setAppliedPoints(0);
+    if (points > 0) {
+      void loadPricingPreview(0, false);
     }
   };
-
-  const openCheckout = useCallback(
-    async (checkoutUrl: string | null | undefined, bookingId: string) => {
-      if (!checkoutUrl) {
-        Alert.alert(
-          "Không có liên kết thanh toán",
-          "Vui lòng thử lại hoặc chọn thanh toán tiền mặt tại garage."
-        );
-        return;
-      }
-      const supported = await Linking.canOpenURL(checkoutUrl);
-      if (!supported) {
-        Alert.alert(
-          "Không thể mở liên kết",
-          "Thiết bị không hỗ trợ mở liên kết thanh toán. Vui lòng thử lại."
-        );
-        return;
-      }
-      await Linking.openURL(checkoutUrl);
-      router.replace({
-        pathname: "/payment-success",
-        params: {
-          bookingId,
-          garageName: params.garageName,
-          serviceName: params.serviceName,
-          startTime: params.startTime,
-          vehiclePlate: params.vehiclePlate,
-          total: String(total),
-          paymentMethod: "PAYOS",
-          pending: "1",
-        },
-      });
-    },
-    [
-      params.garageName,
-      params.serviceName,
-      params.startTime,
-      params.vehiclePlate,
-      router,
-      total,
-    ]
-  );
 
   const handleConfirmBooking = async () => {
     if (!isAuthenticated || !accessToken) {
@@ -386,6 +436,23 @@ export default function PaymentScreen() {
       return;
     }
 
+    if (pricingBlocked) {
+      if (hasUnappliedPoints) {
+        Alert.alert(
+          "Điểm chưa được áp dụng",
+          "Vui lòng bấm Áp điểm hoặc nhập 0 trước khi xác nhận booking."
+        );
+        return;
+      }
+
+      Alert.alert(
+        "Chưa xác nhận được tổng tiền",
+        pricingError ??
+          "Vui lòng chờ hệ thống xác nhận khuyến mãi, voucher và điểm thưởng."
+      );
+      return;
+    }
+
     setSubmitting(true);
     try {
       const addOnIdsRaw = params.addOnIds ?? "";
@@ -395,11 +462,6 @@ export default function PaymentScreen() {
             .map((s) => s.trim())
             .filter(Boolean)
         : undefined;
-
-      const noteText =
-        selectedPayment === "payos"
-          ? "Customer chọn thanh toán PayOS online."
-          : "Customer chọn thanh toán tiền mặt tại garage.";
 
       const response = await api.createBooking(accessToken, {
         garage_id: params.garageId,
@@ -411,43 +473,9 @@ export default function PaymentScreen() {
         promotion_code: appliedPromo?.promotion.code,
         voucher_code: appliedVoucher?.code,
         used_points: appliedPoints || undefined,
-        note: noteText,
       });
 
       const bookingId = response.data.id;
-
-      if (selectedPayment === "payos") {
-        try {
-          const paymentResponse = await api.createPayosPayment(
-            accessToken,
-            bookingId
-          );
-          const checkoutUrl = paymentResponse.data?.payment?.checkout_url;
-          await openCheckout(checkoutUrl, bookingId);
-          return;
-        } catch (payosError) {
-          const payosMessage =
-            payosError instanceof ApiError
-              ? payosError.message
-              : "Không thể khởi tạo thanh toán PayOS.";
-          Alert.alert(
-            "Booking đã tạo nhưng PayOS lỗi",
-            `${payosMessage}\n\nBạn có thể thanh toán sau từ chi tiết lịch hẹn.`,
-            [
-              { text: "Ở lại", style: "cancel" },
-              {
-                text: "Xem chi tiết",
-                onPress: () =>
-                  router.replace({
-                    pathname: "/booking-detail",
-                    params: { id: bookingId },
-                  }),
-              },
-            ]
-          );
-          return;
-        }
-      }
 
       router.replace({
         pathname: "/payment-success",
@@ -458,7 +486,7 @@ export default function PaymentScreen() {
           startTime: params.startTime,
           vehiclePlate: params.vehiclePlate,
           total: String(response.data.final_price ?? total),
-          paymentMethod: "CASH",
+          paymentMethod: "UNPAID",
         },
       });
     } catch (error) {
@@ -522,7 +550,7 @@ export default function PaymentScreen() {
         <BookingInfoCard
           info={{
             serviceName: params.serviceName ?? "Dịch vụ đã chọn",
-            price: formatCurrency(basePrice),
+            price: formatCurrency(displayBasePrice),
             plate: params.vehiclePlate ?? "Chưa rõ biển số",
             time: formatDateTime(params.startTime),
             location: params.garageName ?? "Garage đã chọn",
@@ -558,8 +586,9 @@ export default function PaymentScreen() {
                 value={usedPoints}
                 onChangeText={(value) => {
                   setUsedPoints(value);
-                  setPointsDiscount(0);
                   setAppliedPoints(0);
+                  setPricingPreview(null);
+                  setPricingError(null);
                 }}
                 keyboardType="number-pad"
                 placeholder="0"
@@ -568,49 +597,49 @@ export default function PaymentScreen() {
               />
               <TouchableOpacity
                 onPress={handleApplyPoints}
-                className="rounded-xl bg-dark px-4 justify-center"
+                disabled={pricingLoading}
+                className={`rounded-xl px-4 justify-center ${
+                  pricingLoading ? "bg-muted" : "bg-dark"
+                }`}
               >
-                <Text className="text-white font-semibold">Áp điểm</Text>
+                {pricingLoading ? (
+                  <ActivityIndicator color="#ffffff" />
+                ) : (
+                  <Text className="text-white font-semibold">Áp điểm</Text>
+                )}
               </TouchableOpacity>
             </View>
           </View>
         ) : null}
 
-        <PaymentMethodList
-          selectedId={selectedPayment}
-          onSelect={(id) => setSelectedPayment(id as SelectedPayment)}
-        />
-
         <PriceSummary rows={priceRows} total={formatCurrency(total)} />
 
-        {selectedPayment === "payos" ? (
-          <View className="mx-4 mb-4 rounded-xl bg-secondary px-4 py-3 flex-row gap-3">
-            <ExternalLink size={18} color="#1a5fd4" strokeWidth={2.4} />
-            <View className="flex-1">
-              <Text className="text-xs text-foreground leading-5">
-                Sau khi xác nhận, hệ thống sẽ mở trang thanh toán PayOS. Bạn
-                có thể quét QR ngân hàng hoặc dùng thẻ Visa/Master/JCB. Trạng
-                thái booking sẽ tự động cập nhật khi thanh toán thành công.
-              </Text>
-            </View>
+        {pricingError && hasBenefits ? (
+          <View className="mx-4 mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
+            <Text className="text-xs font-semibold text-red-700">
+              {pricingError}
+            </Text>
           </View>
         ) : null}
 
+        <View className="mx-4 mb-4 rounded-xl bg-secondary px-4 py-3 flex-row gap-3">
+          <Clock3 size={18} color="#1a5fd4" strokeWidth={2.4} />
+          <View className="flex-1">
+            <Text className="text-xs text-foreground leading-5">
+              Bạn chưa cần thanh toán khi đặt lịch. Sau khi garage hoàn tất
+              dịch vụ và bạn xác nhận bàn giao xe, bạn có thể chọn PayOS hoặc
+              thanh toán tiền mặt tại garage.
+            </Text>
+          </View>
+        </View>
+
         <View className="px-4 pb-4">
           <LoadingButton
-            title={
-              selectedPayment === "payos"
-                ? "Xác nhận và thanh toán PayOS"
-                : "Xác nhận đặt lịch"
-            }
-            disabled={loading}
+            title="Xác nhận đặt lịch"
+            disabled={loading || pricingBlocked}
             onPress={handleConfirmBooking}
             loading={submitting}
-            loadingTitle={
-              selectedPayment === "payos"
-                ? "Đang mở PayOS..."
-                : "Đang tạo lịch hẹn..."
-            }
+            loadingTitle="Đang tạo lịch hẹn..."
             icon={ArrowRight}
             iconPosition="right"
             variant="primary"

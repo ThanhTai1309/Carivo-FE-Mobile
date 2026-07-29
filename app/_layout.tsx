@@ -1,6 +1,5 @@
 import "../global.css";
 import { useEffect } from "react";
-import { Linking, Platform } from "react-native";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { AppProvider } from "@/providers/AppProvider";
@@ -13,32 +12,6 @@ import {
 } from "@/lib/pushNotifications";
 import { handleNotificationDeepLink } from "@/lib/deepLinks";
 
-function useLinkingObserver() {
-  useEffect(() => {
-    const handleUrl = (event: { url: string }) => {
-      const url = event.url;
-      if (!url) return;
-      const matched = url.match(/^carwash:\/(.+)$/);
-      if (matched) {
-        const path = `/${matched[1]}`;
-        handleNotificationDeepLink({ url: path });
-      }
-    };
-
-    Linking.addEventListener("url", handleUrl);
-
-    if (Platform.OS !== "web") {
-      Linking.getInitialURL().then((url) => {
-        if (url) handleUrl({ url });
-      });
-    }
-
-    return () => {
-      Linking.removeAllListeners("url");
-    };
-  }, []);
-}
-
 export default function RootLayout() {
   useEffect(() => {
     startNotificationObservers();
@@ -50,8 +23,6 @@ export default function RootLayout() {
       stopNotificationObservers();
     };
   }, []);
-
-  useLinkingObserver();
 
   return (
     <AppProvider>

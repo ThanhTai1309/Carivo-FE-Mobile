@@ -438,10 +438,14 @@ export const api = {
     return request<
       ApiEnvelope<{
         original_price?: number;
+        promotion_discount_amount?: number;
+        price_after_promotion?: number;
+        available_points?: number;
+        used_points?: number;
+        point_value_amount?: number;
         discount_amount?: number;
         final_price?: number;
-        points_value?: number;
-        points_discount?: number;
+        points_discount_amount?: number;
       }>
     >("/loyalty/redeem-preview", {
       method: "POST",
@@ -537,8 +541,8 @@ export const api = {
   },
 
   cancelPayosPayment(token: string, paymentId: string, reason?: string) {
-    return request<ApiEnvelope<{ payment: PaymentTransaction }>>(
-      `/admin/payments/${paymentId}/cancel`,
+    return request<ApiEnvelope<CustomerPaymentResponse>>(
+      `/payments/${paymentId}/cancel`,
       {
         method: "PATCH",
         token,

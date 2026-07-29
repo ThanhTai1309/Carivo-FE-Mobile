@@ -37,6 +37,7 @@ import {
   ShieldCheck,
   Star,
   Truck,
+  Wallet,
   Wrench,
   X,
   XCircle,
@@ -680,6 +681,13 @@ export default function BookingDetailScreen() {
     );
   };
 
+  const handleChooseCash = () => {
+    Alert.alert(
+      "Thanh toán tiền mặt tại garage",
+      "Vui lòng thanh toán trực tiếp với nhân viên garage. Trạng thái sẽ được cập nhật sau khi nhân viên xác nhận đã thu tiền."
+    );
+  };
+
   const timelineSteps = useMemo(
     () =>
       booking
@@ -701,12 +709,22 @@ export default function BookingDetailScreen() {
     (payosPayment.status === "PENDING" ||
       payosPayment.status === "INITIATED" ||
       payosPayment.status === "CANCELING");
-  const canPayNow =
+  const handoverRequiresPayment =
+    handover != null &&
+    handover.state === "READY_FOR_CUSTOMER" &&
+    handover.customer_response === "ACCEPTED";
+  const canChoosePayment =
     booking &&
     booking.status === "COMPLETED" &&
-    booking.payment_status !== "PAID" &&
+    booking.payment_status === "UNPAID" &&
+    handoverRequiresPayment &&
     !isPayosPending;
-  const canCancelPayos = booking && booking.status === "COMPLETED" && isPayosPending;
+  const canCancelPayos =
+    booking &&
+    booking.status === "COMPLETED" &&
+    payosPayment != null &&
+    (payosPayment.status === "PENDING" ||
+      payosPayment.status === "CANCELING");
   const showIncidentBanner =
     booking != null &&
     booking.operation_status === "AWAITING_CUSTOMER_DECISION" &&
@@ -717,11 +735,6 @@ export default function BookingDetailScreen() {
     handover != null &&
     handover.state !== "RELEASED" &&
     handover.customer_response !== "ACCEPTED";
-  const handoverRequiresPayment =
-    handover != null &&
-    handover.state === "READY_FOR_CUSTOMER" &&
-    handover.customer_response === "ACCEPTED";
-
   const handleOpenHandover = () => {
     if (!booking) return;
     router.push({
@@ -1202,22 +1215,24 @@ export default function BookingDetailScreen() {
         ) : null}
 
         {/* Handover đã accept — thông báo đã xác nhận */}
-        {handoverRequiresPayment && !canPayNow ? (
+        {handoverRequiresPayment &&
+        (booking.payment_status === "PAID" ||
+          booking.payment_status === "WAIVED") ? (
           <View className="mx-4 mt-4 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 flex-row gap-3">
             <CheckCircle2 size={20} color="#15803d" strokeWidth={2.4} />
             <View className="flex-1">
               <Text className="text-sm font-bold text-emerald-800">
-                Đã xác nhận nhận xe
+                Đã hoàn tất bàn giao và thanh toán
               </Text>
               <Text className="text-xs text-emerald-700 mt-1 leading-5">
-                Cảm ơn bạn. Garage đang hoàn tất thủ tục thanh toán.
+                Cảm ơn bạn đã xác nhận nhận xe và hoàn tất nghĩa vụ thanh toán.
               </Text>
             </View>
           </View>
         ) : null}
 
         {/* Payment banner for UNPAID completed bookings */}
-        {canPayNow ? (
+        {canChoosePayment ? (
           <View className="mx-4 mt-4 rounded-2xl bg-amber-50 border border-amber-200 p-4 flex-row gap-3">
             <AlertTriangle size={20} color="#a16207" strokeWidth={2.4} />
             <View className="flex-1">
@@ -1306,16 +1321,24 @@ export default function BookingDetailScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {canPayNow ? (
-            <LoadingButton
-              title="Thanh toán ngay qua PayOS"
-              onPress={handlePayNow}
-              loading={openingCheckout}
-              loadingTitle="Đang mở PayOS..."
-              variant="primary"
-              icon={CreditCard}
-              className="shadow-lg shadow-primary/30"
-            />
+          {canChoosePayment ? (
+            <>
+              <LoadingButton
+                title="Thanh toán ngay qua PayOS"
+                onPress={handlePayNow}
+                loading={openingCheckout}
+                loadingTitle="Đang mở PayOS..."
+                variant="primary"
+                icon={CreditCard}
+                className="shadow-lg shadow-primary/30"
+              />
+              <LoadingButton
+                title="Thanh toán tiền mặt tại garage"
+                onPress={handleChooseCash}
+                variant="secondary"
+                icon={Wallet}
+              />
+            </>
           ) : null}
 
           {canCancelPayos ? (

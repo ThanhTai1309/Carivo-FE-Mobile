@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -72,8 +72,14 @@ function InfoRow({
 }
 
 function PaymentBadge({ label }: { label: string }) {
-  const Icon = label === "CASH" ? Wallet : CreditCard;
-  const text = label === "CASH" ? "Tiền mặt tại garage" : "PayOS Online";
+  const isPayos = label === "PAYOS";
+  const isCash = label === "CASH";
+  const Icon = isPayos ? CreditCard : isCash ? Wallet : Clock4;
+  const text = isPayos
+    ? "PayOS Online"
+    : isCash
+      ? "Tiền mặt tại garage"
+      : "Thanh toán sau dịch vụ";
   return (
     <View className="flex-row items-center gap-1.5">
       <Icon size={18} color="#1a1f2e" strokeWidth={2} />
@@ -85,6 +91,19 @@ function PaymentBadge({ label }: { label: string }) {
 }
 
 type PaymentState = "PENDING" | "PAID" | "FAILED" | "EXPIRED" | "CANCELED";
+
+function getBookingPaymentLabel(status?: string): string {
+  switch (status) {
+    case "PAID":
+      return "Đã thanh toán";
+    case "PENDING":
+      return "Đang chờ thanh toán";
+    case "WAIVED":
+      return "Được miễn thanh toán";
+    default:
+      return "Chưa thanh toán";
+  }
+}
 
 function pickState(payment: PaymentTransaction | null): PaymentState {
   if (!payment) return "PENDING";
@@ -127,6 +146,7 @@ export default function PaymentSuccessScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stoppedRef = useRef(false);
+  const pollErrorCountRef = useRef(0);
 
   const ringScale = useRef(new Animated.Value(0.7)).current;
   const ringOpacity = useRef(new Animated.Value(0)).current;
@@ -134,7 +154,7 @@ export default function PaymentSuccessScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current;
   const slideUp = useRef(new Animated.Value(20)).current;
 
-  const playSuccessAnimation = useCallback(() => {
+  const playEntranceAnimation = useCallback(() => {
     ringScale.setValue(0.7);
     ringOpacity.setValue(0);
     checkScale.setValue(0);
@@ -177,10 +197,8 @@ export default function PaymentSuccessScreen() {
   }, [checkScale, fadeIn, ringOpacity, ringScale, slideUp]);
 
   useEffect(() => {
-    if (pollState === "PAID" || pollState === "FAILED") {
-      playSuccessAnimation();
-    }
-  }, [pollState, playSuccessAnimation]);
+    playEntranceAnimation();
+  }, [pollState, playEntranceAnimation]);
 
   const stopPolling = useCallback(() => {
     stoppedRef.current = true;
@@ -201,6 +219,7 @@ export default function PaymentSuccessScreen() {
 
       const next = paymentResponse.data?.payment ?? null;
       setPayment(next);
+      pollErrorCountRef.current = 0;
       if (bookingResponse) {
         setBooking(bookingResponse.data);
       }
@@ -223,12 +242,28 @@ export default function PaymentSuccessScreen() {
         stopPolling();
       }
     } catch (error) {
-      if (error instanceof ApiError) {
-        // Soft error: stop polling, show last known state
+      if (
+        error instanceof ApiError &&
+        (error.status === 401 || error.status === 403)
+      ) {
         stopPolling();
-      } else {
-        stopPolling();
+        return;
       }
+
+      if (error instanceof ApiError && error.status === 404) {
+        setPollState("FAILED");
+        stopPolling();
+        return;
+      }
+
+      pollErrorCountRef.current += 1;
+      const delay = Math.min(
+        10000,
+        1500 * 2 ** Math.min(pollErrorCountRef.current, 3)
+      );
+      pollTimeoutRef.current = setTimeout(() => {
+        void pollPayment();
+      }, delay);
     }
   }, [accessToken, params.bookingId, stopPolling]);
 
@@ -243,11 +278,33 @@ export default function PaymentSuccessScreen() {
     };
   }, [isPendingPayos, isAuthenticated, accessToken, params.bookingId, pollPayment, stopPolling]);
 
+  useEffect(() => {
+    if (
+      isPayosFlow ||
+      !isAuthenticated ||
+      !accessToken ||
+      !params.bookingId
+    ) {
+      return;
+    }
+
+    void api
+      .getBooking(accessToken, params.bookingId)
+      .then((response) => setBooking(response.data))
+      .catch(() => null);
+  }, [
+    accessToken,
+    isAuthenticated,
+    isPayosFlow,
+    params.bookingId,
+  ]);
+
   const onRefresh = useCallback(async () => {
     if (!accessToken || !params.bookingId) return;
     setRefreshing(true);
     try {
       stoppedRef.current = false;
+      pollErrorCountRef.current = 0;
       await pollPayment();
     } finally {
       setRefreshing(false);
@@ -259,35 +316,33 @@ export default function PaymentSuccessScreen() {
   }, [stopPolling]);
 
   const bookingIdDisplay = shortBookingId(params.bookingId);
-  const formattedStartTime = params.startTime
-    ? formatDateTimeLong(params.startTime)
+  const startTime = booking?.start_time ?? params.startTime;
+  const garageName = booking?.garage?.name ?? params.garageName;
+  const serviceName = booking?.service_package?.name ?? params.serviceName;
+  const vehiclePlate =
+    booking?.vehicle?.raw_license_plate ?? params.vehiclePlate;
+  const formattedStartTime = startTime
+    ? formatDateTimeLong(startTime)
     : "Chưa có thời gian";
-  const formattedShortTime = useMemo(() => {
-    if (!params.startTime) return "";
-    return new Date(params.startTime).toLocaleTimeString("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }, [params.startTime]);
-  const totalAmount = formatCurrency(Number(params.total ?? 0));
+  const totalAmount = formatCurrency(
+    payment?.amount ?? booking?.final_price ?? Number(params.total ?? 0)
+  );
 
   const isPaid = pollState === "PAID";
   const isPending = pollState === "PENDING";
   const isFailed =
     pollState === "FAILED" || pollState === "EXPIRED" || pollState === "CANCELED";
 
-  // Với CASH chưa có transaction PayOS → pollState mặc định = "PAID"
-  // nhưng hero copy phải là "Đặt lịch thành công" (không phải "Thanh toán thành công").
-  const isCashFlow = !isPayosFlow;
-  const heroTitle = isCashFlow
+  const isBookingFlow = !isPayosFlow;
+  const heroTitle = isBookingFlow
     ? "Đặt lịch thành công!"
     : isPaid
       ? "Thanh toán thành công!"
       : isPending
         ? "Đang chờ thanh toán..."
         : "Thanh toán chưa hoàn tất";
-  const heroDescription = isCashFlow
-    ? "Lịch hẹn đã được tạo. Bạn sẽ thanh toán trực tiếp tại garage khi đến."
+  const heroDescription = isBookingFlow
+    ? "Lịch hẹn đã được tạo. Bạn sẽ chọn PayOS hoặc tiền mặt sau khi dịch vụ hoàn tất và xác nhận bàn giao xe."
     : isPaid
       ? "Cảm ơn bạn đã thanh toán. Chúng tôi sẽ xử lý lịch hẹn của bạn ngay."
       : isPending
@@ -299,9 +354,9 @@ export default function PaymentSuccessScreen() {
     try {
       await Share.share({
         message: `Đặt lịch Carivo thành công!\nMã: ${bookingIdDisplay}\nDịch vụ: ${
-          params.serviceName ?? "—"
+          serviceName ?? "—"
         }\nThời gian: ${formattedStartTime}\nĐịa điểm: ${
-          params.garageName ?? "—"
+          garageName ?? "—"
         }\nTổng: ${totalAmount}`,
         title: "Đặt lịch Carivo",
       });
@@ -486,30 +541,27 @@ export default function PaymentSuccessScreen() {
             <InfoRow
               icon={Calendar}
               label="Ngày & giờ"
-              value={
-                formattedStartTime +
-                (formattedShortTime ? ` • ${formattedShortTime}` : "")
-              }
+              value={formattedStartTime}
             />
             <View className="h-px bg-border my-4" />
             <InfoRow
               icon={MapPin}
               label="Địa điểm"
-              value={params.garageName ?? "Garage đã chọn"}
+              value={garageName ?? "Garage đã chọn"}
             />
             <View className="h-px bg-border my-4" />
             <InfoRow
               icon={CarFront}
               label="Gói dịch vụ"
-              value={params.serviceName ?? "Dịch vụ đã chọn"}
+              value={serviceName ?? "Dịch vụ đã chọn"}
             />
-            {params.vehiclePlate ? (
+            {vehiclePlate ? (
               <>
                 <View className="h-px bg-border my-4" />
                 <InfoRow
                   icon={Clock4}
                   label="Biển số xe"
-                  value={params.vehiclePlate}
+                  value={vehiclePlate}
                 />
               </>
             ) : null}
@@ -529,7 +581,7 @@ export default function PaymentSuccessScreen() {
 
             <View className="h-px bg-border my-4" />
             <View className="flex-row items-center justify-between">
-              <PaymentBadge label={params.paymentMethod ?? "CASH"} />
+              <PaymentBadge label={params.paymentMethod ?? "UNPAID"} />
               {isPayosFlow ? (
                 <View className="flex-row items-center gap-1.5">
                   {isPending ? (
@@ -556,8 +608,10 @@ export default function PaymentSuccessScreen() {
                   </Text>
                 </View>
               ) : (
-                <View style={styles.cardLogo}>
-                  <Text style={styles.cardLogoText}>CASH</Text>
+                <View className="rounded-full bg-amber-100 px-2.5 py-1">
+                  <Text className="text-[10px] font-bold text-amber-700">
+                    CHƯA THANH TOÁN
+                  </Text>
                 </View>
               )}
             </View>
@@ -596,7 +650,7 @@ export default function PaymentSuccessScreen() {
                     Trạng thái booking
                   </Text>
                   <Text className="text-xs font-semibold text-foreground">
-                    {booking.payment_status}
+                    {getBookingPaymentLabel(booking.payment_status)}
                   </Text>
                 </View>
               </>
@@ -693,8 +747,8 @@ export default function PaymentSuccessScreen() {
             </TouchableOpacity>
           </View>
           <Text className="text-[11px] text-muted-foreground/80 text-center leading-relaxed mt-2">
-            Lịch hẹn sẽ được giữ trong 15 phút. Vui lòng đến đúng giờ để được
-            phục vụ tốt nhất.
+            Bạn có thể theo dõi trạng thái và thông tin thanh toán trong chi
+            tiết lịch hẹn.
           </Text>
         </Animated.View>
       </ScrollView>
@@ -756,19 +810,5 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 14,
     elevation: 3,
-  },
-  cardLogo: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 4,
-    backgroundColor: "#1a5fd4",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  cardLogoText: {
-    color: "#ffffff",
-    fontSize: 10,
-    fontWeight: "900",
-    letterSpacing: 0.5,
   },
 });
