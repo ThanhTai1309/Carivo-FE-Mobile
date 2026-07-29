@@ -322,6 +322,49 @@ export interface BookingVoucher {
   status?: string | null;
 }
 
+export interface BookingStaffUser {
+  id: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
+  role?: string;
+  is_active?: boolean;
+}
+
+export interface BookingStaffProfile {
+  id: string;
+  user_id?: string | null;
+  user?: BookingStaffUser | null;
+  staff_code?: string | null;
+  staff_type?: string | null;
+  staff_group?: string | null;
+}
+
+export interface BookingStaffAssignment {
+  staff_profile_id?: string | null;
+  staff_profile?: BookingStaffProfile | null;
+  user_id?: string | null;
+  user?: BookingStaffUser | null;
+  assigned_at?: string | null;
+  released_at?: string | null;
+}
+
+export interface BookingItem {
+  item_key: string;
+  name_snapshot?: string | null;
+  sequence?: number;
+  status?: string;
+  requires_wash_bay?: boolean;
+  requires_care_staff?: boolean;
+  assigned_care_staff?: BookingStaffAssignment[];
+  assigned_execution_staff?: BookingStaffAssignment[];
+}
+
+export interface BookingWashBay {
+  id: string;
+  name?: string | null;
+  bay_code?: string | null;
+}
+
 export interface Booking {
   id: string;
   garage_id: string;
@@ -358,6 +401,8 @@ export interface Booking {
   garage?: Garage | null;
   vehicle?: Vehicle | null;
   service_package?: ServicePackage | null;
+  wash_bay?: BookingWashBay | null;
+  booking_items?: BookingItem[];
   note?: string | null;
   used_points?: number;
   earned_points?: number;

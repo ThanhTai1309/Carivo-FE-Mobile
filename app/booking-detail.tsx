@@ -30,6 +30,7 @@ import {
   Hourglass,
   Info,
   MapPin,
+  PhoneCall,
   Receipt,
   RefreshCw,
   RotateCcw,
@@ -37,6 +38,7 @@ import {
   ShieldCheck,
   Star,
   Truck,
+  UsersRound,
   Wallet,
   Wrench,
   X,
@@ -339,10 +341,9 @@ export default function BookingDetailScreen() {
   const [feedbackStatus, setFeedbackStatus] =
     useState<FeedbackRewardStatus | null>(null);
 
-  // Auto-poll booking when waiting for staff confirmation or PayOS.
   const shouldPoll =
     booking != null &&
-    (booking.status === "PENDING" ||
+    (["PENDING", "CHECKED_IN", "IN_PROGRESS"].includes(booking.status) ||
       (payosPayment != null &&
         (payosPayment.status === "PENDING" ||
           payosPayment.status === "INITIATED" ||
@@ -374,7 +375,7 @@ export default function BookingDetailScreen() {
       return latest;
     },
     stopWhen: (latest) =>
-      latest.status !== "PENDING" &&
+      !["PENDING", "CHECKED_IN", "IN_PROGRESS"].includes(latest.status) &&
       !(
         payosPayment != null &&
         (payosPayment.status === "PENDING" ||
@@ -822,6 +823,50 @@ export default function BookingDetailScreen() {
     booking.service_package?.name ?? booking.service_package_id;
   const garageName = booking.garage?.name ?? booking.garage_id;
   const shortId = booking.id.slice(0, 8).toUpperCase();
+  const currentItemStatuses = [
+    "IN_PROGRESS",
+    "PAUSED",
+    "AWAITING_CONFIRMATION",
+    "WAITING_RESOURCE",
+  ];
+  const bookingItems = booking.booking_items ?? [];
+  const currentServiceItems = bookingItems.filter((item) =>
+    currentItemStatuses.includes(item.status ?? "")
+  );
+  const visibleServiceItems =
+    currentServiceItems.length > 0
+      ? currentServiceItems
+      : ["CHECKED_IN", "IN_PROGRESS"].includes(booking.status)
+        ? bookingItems.filter((item) => item.status === "PENDING")
+        : [];
+  const visibleAssignedStaff = visibleServiceItems.flatMap((item) => [
+    ...(item.assigned_execution_staff ?? [])
+      .filter((assignment) => !assignment.released_at)
+      .map((assignment) => ({
+        key: `${item.item_key}-wash-${assignment.staff_profile_id ?? assignment.user_id}`,
+        fullName:
+          assignment.user?.full_name ??
+          assignment.staff_profile?.user?.full_name ??
+          "Nhân viên garage",
+        responsibility: "Vận hành rửa",
+        itemName: item.name_snapshot ?? "Dịch vụ rửa xe",
+        staffCode: assignment.staff_profile?.staff_code ?? null,
+        washBay: booking.wash_bay,
+      })),
+    ...(item.assigned_care_staff ?? [])
+      .filter((assignment) => !assignment.released_at)
+      .map((assignment) => ({
+        key: `${item.item_key}-care-${assignment.staff_profile_id ?? assignment.user_id}`,
+        fullName:
+          assignment.user?.full_name ??
+          assignment.staff_profile?.user?.full_name ??
+          "Nhân viên garage",
+        responsibility: "Chăm sóc xe",
+        itemName: item.name_snapshot ?? "Dịch vụ chăm sóc xe",
+        staffCode: assignment.staff_profile?.staff_code ?? null,
+        washBay: null,
+      })),
+  ]);
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top", "bottom"]}>
@@ -983,6 +1028,61 @@ export default function BookingDetailScreen() {
             />
           ))}
         </View>
+
+        {visibleAssignedStaff.length > 0 ? (
+          <View className="mx-4 mt-4 rounded-3xl bg-card p-5">
+            <View className="flex-row items-center gap-2 mb-4">
+              <UsersRound size={18} color="#1a5fd4" strokeWidth={2.2} />
+              <Text className="text-base font-bold text-foreground">
+                Nhân sự đang phụ trách
+              </Text>
+            </View>
+
+            <View className="gap-3">
+              {visibleAssignedStaff.map((staff) => (
+                <View
+                  key={staff.key}
+                  className="rounded-2xl bg-secondary/60 px-4 py-3"
+                >
+                  <Text className="text-sm font-bold text-foreground">
+                    {staff.fullName}
+                  </Text>
+                  <Text className="text-xs text-primary font-semibold mt-1">
+                    {staff.responsibility}
+                    {staff.staffCode ? ` · ${staff.staffCode}` : ""}
+                  </Text>
+                  <Text className="text-xs text-muted-foreground mt-1">
+                    Hạng mục: {staff.itemName}
+                  </Text>
+                  {staff.washBay ? (
+                    <Text className="text-xs text-muted-foreground mt-1">
+                      Buồng rửa: {staff.washBay.name ?? "Chưa cập nhật"}
+                      {staff.washBay.bay_code
+                        ? ` · ${staff.washBay.bay_code}`
+                        : ""}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </View>
+
+            {booking.garage?.phone ? (
+              <TouchableOpacity
+                onPress={() =>
+                  Linking.openURL(`tel:${booking.garage?.phone ?? ""}`)
+                }
+                className="mt-4 h-11 rounded-xl bg-primary flex-row items-center justify-center gap-2"
+                accessibilityRole="button"
+                accessibilityLabel="Gọi số điện thoại chính thức của garage"
+              >
+                <PhoneCall size={17} color="#ffffff" strokeWidth={2.3} />
+                <Text className="text-sm font-bold text-primary-foreground">
+                  Liên hệ garage
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
         {/* Payment summary */}
         <View className="mx-4 mt-4 rounded-3xl bg-card p-5">
