@@ -135,6 +135,7 @@ function extractData(notification: Notifications.Notification): PushNotification
 }
 
 export function startNotificationObservers() {
+  if (Platform.OS === "web") return;
   if (foregroundSubscription || responseSubscription) return;
 
   foregroundSubscription = Notifications.addNotificationReceivedListener(

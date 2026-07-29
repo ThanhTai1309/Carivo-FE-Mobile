@@ -19,7 +19,11 @@ import {
   ExternalLink,
   HelpCircle,
 } from "lucide-react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useRouter,
+} from "expo-router";
 import StepIndicator from "@/components/booking/StepIndicator";
 import GarageCard from "@/components/booking/GarageCard";
 import VehicleSelector from "@/components/booking/VehicleSelector";
@@ -39,6 +43,49 @@ import { useApp } from "@/providers/AppProvider";
 
 function toVehicleName(vehicle: Vehicle) {
   return `${vehicle.brand ?? ""} ${vehicle.model ?? ""}`.trim() || vehicle.vehicle_type;
+}
+
+function toMinutes(value: string | null | undefined, fallback: number) {
+  const [hours, minutes] = String(value ?? "").split(":").map(Number);
+  if (
+    !Number.isInteger(hours) ||
+    !Number.isInteger(minutes) ||
+    hours < 0 ||
+    hours > 23 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return fallback;
+  }
+  return hours * 60 + minutes;
+}
+
+function toClockLabel(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function toSlotClock(value: string) {
+  return new Date(value).toLocaleTimeString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function getUnavailableSlotLabel(slot: AvailableSlot) {
+  const reasons = slot.unavailable_reasons ?? [];
+  if (reasons.includes("VEHICLE_BOOKING_OVERLAP")) {
+    return "Xe đã có lịch";
+  }
+  if (reasons.includes("WASH_BAY_CAPACITY_FULL")) {
+    return "Hết khoang rửa";
+  }
+  if (reasons.includes("CARE_STAFF_CAPACITY_FULL")) {
+    return "Hết nhân sự";
+  }
+  return "Không khả dụng";
 }
 
 type StepState = "done" | "active" | "inactive";
@@ -66,6 +113,9 @@ export default function BookingScreen() {
   const [slots, setSlots] = useState<AvailableSlot[]>([]);
   const [loading, setLoading] = useState(true);
   const [slotsLoading, setSlotsLoading] = useState(false);
+  const [availabilityChecked, setAvailabilityChecked] = useState(false);
+  const [slotError, setSlotError] = useState<string | null>(null);
+  const [slotReloadKey, setSlotReloadKey] = useState(0);
   const [priceQuote, setPriceQuote] = useState<PriceQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
@@ -106,8 +156,45 @@ export default function BookingScreen() {
   }, [mainServices, selectedVehicle]);
 
   const selectedService = services.find((service) => service.id === selectedServiceId);
+  const availabilityReady = Boolean(
+    selectedGarageId &&
+      selectedServiceId &&
+      (!isAuthenticated || selectedVehicleId)
+  );
+  const referenceSlotItems = useMemo(() => {
+    const sourceGarages = selectedGarage ? [selectedGarage] : garages;
+    const openingCandidates = sourceGarages.map((garage) =>
+      toMinutes(garage.opening_time, 7 * 60)
+    );
+    const closingCandidates = sourceGarages.map((garage) =>
+      toMinutes(garage.closing_time, 18 * 60)
+    );
+    const openingMinutes =
+      openingCandidates.length > 0 ? Math.min(...openingCandidates) : 7 * 60;
+    const closingMinutes =
+      closingCandidates.length > 0 ? Math.max(...closingCandidates) : 18 * 60;
+    const intervalMinutes = selectedGarage?.slot_interval_minutes ?? 30;
+    const items = [];
 
-  const loadBootData = async () => {
+    for (
+      let current = openingMinutes;
+      current < closingMinutes;
+      current += intervalMinutes
+    ) {
+      const label = toClockLabel(current);
+      items.push({
+        id: `preview-${selectedDate}-${label}`,
+        label,
+        detail: "Chưa kiểm tra",
+        state: "preview" as const,
+        raw: null as AvailableSlot | null,
+      });
+    }
+
+    return items;
+  }, [garages, selectedDate, selectedGarage]);
+
+  const loadBootData = useCallback(async () => {
     try {
       setError(null);
       const [garagesResponse, servicesResponse] = await Promise.all([
@@ -140,7 +227,13 @@ export default function BookingScreen() {
           ) {
             return incomingVehicleId;
           }
-          return current;
+          if (current && vehicleData.some((v) => v.id === current)) {
+            return current;
+          }
+          return (
+            vehicleData.find((vehicle) => vehicle.is_default)?.id ??
+            (vehicleData.length === 1 ? vehicleData[0]?.id ?? "" : "")
+          );
         });
       } else {
         setVehicles([]);
@@ -153,11 +246,18 @@ export default function BookingScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    accessToken,
+    incomingGarageId,
+    incomingVehicleId,
+    isAuthenticated,
+  ]);
 
-  useEffect(() => {
-    void loadBootData();
-  }, [accessToken, isAuthenticated]);
+  useFocusEffect(
+    useCallback(() => {
+      void loadBootData();
+    }, [loadBootData])
+  );
 
   // Khi đổi xe: nếu service chính / add-ons không phù hợp → clear
   useEffect(() => {
@@ -192,13 +292,21 @@ export default function BookingScreen() {
 
   // Fetch available slots
   useEffect(() => {
+    let cancelled = false;
+
     const fetchSlots = async () => {
-      if (!selectedGarageId || !selectedServiceId) {
+      if (!availabilityReady) {
         setSlots([]);
+        setSlotsLoading(false);
+        setAvailabilityChecked(false);
+        setSlotError(null);
+        setSelectedSlot(null);
         return;
       }
 
       setSlotsLoading(true);
+      setAvailabilityChecked(false);
+      setSlotError(null);
       setSelectedSlot(null);
       try {
         const response = await api.getAvailableSlots(
@@ -213,29 +321,43 @@ export default function BookingScreen() {
           accessToken
         );
 
+        if (cancelled) return;
         const nextSlots =
+          response.data.days?.[0]?.slots ??
+          response.data.slots ??
           response.data.days?.[0]?.available_slots ??
           response.data.available_slots ??
           [];
         setSlots(nextSlots);
+        setAvailabilityChecked(true);
       } catch (error) {
+        if (cancelled) return;
         setSlots([]);
         const message =
           error instanceof ApiError ? error.message : "Không thể tải khung giờ.";
-        setError(message);
+        setSlotError(message);
+        setAvailabilityChecked(false);
       } finally {
-        setSlotsLoading(false);
+        if (!cancelled) {
+          setSlotsLoading(false);
+        }
       }
     };
 
     void fetchSlots();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
     accessToken,
+    availabilityReady,
     selectedDate,
     selectedGarageId,
     selectedServiceId,
     selectedVehicleId,
     addOnServiceIds,
+    slotReloadKey,
   ]);
 
   useEffect(() => {
@@ -358,24 +480,54 @@ export default function BookingScreen() {
     );
   }
 
-  const slotItems = slots.map((slot, index) => ({
+  const resolvedSlotItems = slots.map((slot) => ({
     id: slot.start_time,
-    label: `${new Date(slot.start_time).toLocaleTimeString("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })} - ${new Date(slot.end_time).toLocaleTimeString("vi-VN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`,
+    label: toSlotClock(slot.start_time),
+    detail: slot.is_available
+      ? `đến ${toSlotClock(slot.end_time)}`
+      : getUnavailableSlotLabel(slot),
     state:
       selectedSlot?.start_time === slot.start_time
         ? ("selected" as const)
         : slot.is_available
           ? ("available" as const)
-          : ("booked" as const),
-    raw: slot,
-    order: index,
+          : ("unavailable" as const),
+    raw: slot as AvailableSlot | null,
   }));
+  const resolvedSlotsByLabel = new Map(
+    resolvedSlotItems.map((item) => [item.label, item])
+  );
+  const referenceLabels = new Set(referenceSlotItems.map((item) => item.label));
+  const fullResolvedSlotItems = [
+    ...referenceSlotItems.map(
+      (item) =>
+        resolvedSlotsByLabel.get(item.label) ?? {
+          ...item,
+          detail: "Không khả dụng",
+          state: "unavailable" as const,
+        }
+    ),
+    ...resolvedSlotItems.filter((item) => !referenceLabels.has(item.label)),
+  ];
+  const slotItems = availabilityChecked
+    ? fullResolvedSlotItems
+    : referenceSlotItems;
+  const availableSlotCount = slotItems.filter(
+    (item) => item.state === "available" || item.state === "selected"
+  ).length;
+  const scheduleHint = slotsLoading
+    ? "Đang kiểm tra khả năng phục vụ theo lựa chọn của bạn."
+    : slotError
+      ? slotError
+      : availabilityChecked
+        ? "Các giờ làm mờ hiện không thể đáp ứng đầy đủ dịch vụ đã chọn."
+        : !selectedGarage
+          ? "Chọn garage để áp dụng giờ hoạt động chính xác."
+          : isAuthenticated && !selectedVehicle
+            ? "Chọn hoặc thêm phương tiện để kiểm tra lịch phù hợp."
+            : !selectedService
+              ? "Chọn dịch vụ để kiểm tra các khung giờ còn khả dụng."
+              : "Đang chờ đủ thông tin để kiểm tra lịch.";
 
   const totalPrice = priceQuote?.subtotal ?? 0;
   const canContinue = Boolean(
@@ -559,6 +711,7 @@ export default function BookingScreen() {
             }))}
             selectedId={selectedVehicleId}
             onSelect={setSelectedVehicleId}
+            onAdd={() => router.push("/vehicle-form")}
           />
         ) : (
           <View className="px-4 mb-4">
@@ -784,30 +937,40 @@ export default function BookingScreen() {
         />
 
         {/* 5. Time slots */}
-        {slotsLoading ? (
-          <View className="px-4 py-6 items-center">
-            <ActivityIndicator color="#1a5fd4" />
-            <Text className="text-sm text-muted-foreground mt-2">
-              Đang tải khung giờ
-            </Text>
-          </View>
-        ) : (
-          <TimeSlotGrid
-            slots={slotItems}
-            onSelect={(id) => {
-              const nextSlot = slotItems.find((item) => item.id === id);
-              if (nextSlot?.raw?.is_available) {
-                setSelectedSlot(nextSlot.raw);
-              }
-            }}
-          />
-        )}
+        <View className="px-4 mb-3 flex-row items-center gap-2">
+          {slotsLoading ? <ActivityIndicator size="small" color="#1a5fd4" /> : null}
+          <Text
+            className={`flex-1 text-xs leading-5 ${
+              slotError ? "text-red-600" : "text-muted-foreground"
+            }`}
+          >
+            {scheduleHint}
+          </Text>
+          {slotError ? (
+            <TouchableOpacity
+              onPress={() => setSlotReloadKey((current) => current + 1)}
+              className="rounded-lg border border-primary px-3 py-2"
+            >
+              <Text className="text-xs font-semibold text-primary">Thử lại</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
-        {slotItems.length === 0 && !slotsLoading ? (
+        <TimeSlotGrid
+          slots={slotItems}
+          onSelect={(id) => {
+            const nextSlot = slotItems.find((item) => item.id === id);
+            if (nextSlot?.raw?.is_available) {
+              setSelectedSlot(nextSlot.raw);
+            }
+          }}
+        />
+
+        {availabilityChecked && availableSlotCount === 0 && !slotsLoading ? (
           <View className="px-4">
             <View className="rounded-xl border border-border bg-card px-4 py-4">
               <Text className="font-semibold text-foreground">
-                Không có khung giờ trống
+                Không có khung giờ khả dụng
               </Text>
               <Text className="text-sm text-muted-foreground mt-1">
                 Thử garage khác, ngày khác hoặc bỏ tick các dịch vụ thêm.

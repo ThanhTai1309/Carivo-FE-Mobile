@@ -21,10 +21,18 @@ const TYPE_ALIASES: Record<string, string> = {
   BOOKING_INCIDENT_REPORTED: "BOOKING",
   BOOKING_INCIDENT_RESOLVED: "BOOKING",
   BOOKING_CUSTOMER_DECISION_REQUIRED: "BOOKING",
+  REVIEW: "REVIEW",
+  REVIEW_REQUEST: "REVIEW",
+  REVIEW_REPLIED: "REVIEW",
+  REVIEW_HIDDEN: "REVIEW",
+  REVIEW_PUBLISHED: "REVIEW",
   CASE: "CUSTOMER_CASE",
   CUSTOMER_CASE: "CUSTOMER_CASE",
   VEHICLE: "VEHICLE",
   PROMOTION: "PROMOTION",
+  CUSTOMER_VOUCHER: "VOUCHER",
+  CUSTOMER_VOUCHER_ISSUED: "VOUCHER",
+  COMPENSATION_VOUCHER_ISSUED: "VOUCHER",
   LOYALTY: "LOYALTY",
 };
 
@@ -39,8 +47,10 @@ function resolveBucket(
     if (upper.includes("WAITLIST")) return "WAITLIST";
     if (upper.includes("CASE")) return "CUSTOMER_CASE";
     if (upper.includes("BOOKING")) return "BOOKING";
+    if (upper.includes("REVIEW")) return "REVIEW";
     if (upper.includes("LOYALTY")) return "LOYALTY";
     if (upper.includes("PROMOTION")) return "PROMOTION";
+    if (upper.includes("VOUCHER")) return "VOUCHER";
     if (upper.includes("VEHICLE")) return "VEHICLE";
   }
   return null;
@@ -72,11 +82,35 @@ export function resolveDeepLink(data: PushNotificationData): DeepLinkTarget | nu
       if (!id) return null;
       return { pathname: "/booking-detail", params: { id } };
 
+    case "REVIEW": {
+      const metadata =
+        data.metadata && typeof data.metadata === "object"
+          ? (data.metadata as Record<string, unknown>)
+          : null;
+      const metadataBookingId =
+        typeof metadata?.booking_id === "string"
+          ? metadata.booking_id
+          : undefined;
+      const bookingId =
+        metadataBookingId ||
+        (typeof data.booking_id === "string" ? data.booking_id : undefined) ||
+        (data.type === "REVIEW_REQUEST" ? id : undefined);
+      return bookingId
+        ? {
+            pathname: "/review/[bookingId]",
+            params: { bookingId },
+          }
+        : { pathname: "/reviews" };
+    }
+
     case "LOYALTY":
       return { pathname: "/(tabs)/profile" };
 
     case "PROMOTION":
       return { pathname: "/(tabs)" };
+
+    case "VOUCHER":
+      return { pathname: "/vouchers" };
 
     case "VEHICLE":
       return { pathname: "/my-vehicles" };

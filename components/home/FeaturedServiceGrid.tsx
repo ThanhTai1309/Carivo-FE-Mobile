@@ -1,139 +1,121 @@
-import { View, Text, TouchableOpacity, ScrollView, Dimensions } from "react-native";
 import {
-  Droplets,
   Armchair,
-  Sparkles,
-  ShieldCheck,
   Car,
-  Wrench,
   ChevronRight,
+  Droplets,
+  ShieldCheck,
+  Sparkles,
+  Star,
+  Wrench,
 } from "lucide-react-native";
+import { Dimensions, ScrollView, Text, TouchableOpacity, View } from "react-native";
+import type { ServicePackage } from "@/lib/types";
 
-const { width: SCREEN_WIDTH } = Dimensions.get("window");
-const CARD_WIDTH = (SCREEN_WIDTH - 32 - 24) / 3; // 3 cards per row, with gaps
-const CARD_WIDTH_HORIZONTAL = (SCREEN_WIDTH - 64) / 2.5; // Each card width for horizontal scroll
-
-interface ServiceItem {
-  id: string;
-  name: string;
-  description: string;
-  icon: React.ComponentType<{ size?: number; color?: string; strokeWidth?: number }>;
-  color: string;
-  bgColor: string;
-}
-
-const SERVICES: ServiceItem[] = [
-  {
-    id: "wash-standard",
-    name: "Rửa tiêu chuẩn",
-    description: "Rửa ngoài, lau khô, kiểm tra nhanh",
-    icon: Droplets,
-    color: "#0ea5e9",
-    bgColor: "#e0f2fe",
-  },
-  {
-    id: "interior",
-    name: "Dọn nội thất",
-    description: "Hút bụi, lau bảng điều khiển, làm sạch ghế",
-    icon: Armchair,
-    color: "#8b5cf6",
-    bgColor: "#ede9fe",
-  },
-  {
-    id: "ceramic",
-    name: "Phủ Ceramic",
-    description: "Bảo vệ sơn, bóng đẹp lâu dài",
-    icon: Sparkles,
-    color: "#f59e0b",
-    bgColor: "#fef3c7",
-  },
-  {
-    id: "sanitize",
-    name: "Khử trùng",
-    description: "Khử khuẩn, làm sạch không khí trong xe",
-    icon: ShieldCheck,
-    color: "#10b981",
-    bgColor: "#d1fae5",
-  },
-  {
-    id: "polish",
-    name: "Đánh bóng",
-    description: "Đánh bóng sơn xe, loại bỏ vết xước nhẹ",
-    icon: Car,
-    color: "#6366f1",
-    bgColor: "#e0e7ff",
-  },
-  {
-    id: "maintenance",
-    name: "Bảo dưỡng",
-    description: "Kiểm tra, thay nhớt, phanh, lốp",
-    icon: Wrench,
-    color: "#ef4444",
-    bgColor: "#fee2e2",
-  },
+const CARD_WIDTH = (Dimensions.get("window").width - 64) / 2.5;
+const ICONS = [Droplets, Armchair, Sparkles, ShieldCheck, Car, Wrench];
+const PALETTES = [
+  { color: "#0ea5e9", backgroundColor: "#e0f2fe" },
+  { color: "#8b5cf6", backgroundColor: "#ede9fe" },
+  { color: "#f59e0b", backgroundColor: "#fef3c7" },
+  { color: "#10b981", backgroundColor: "#d1fae5" },
+  { color: "#6366f1", backgroundColor: "#e0e7ff" },
+  { color: "#ef4444", backgroundColor: "#fee2e2" },
 ];
 
-interface FeaturedServiceGridProps {
-  onSelect?: (service: ServiceItem) => void;
-}
+export default function FeaturedServiceGrid({
+  services,
+  onSelect,
+}: {
+  services: ServicePackage[];
+  onSelect?: (service: ServicePackage) => void;
+}) {
+  const visibleServices = services
+    .filter((service) => service.service_type !== "ADDON")
+    .slice(0, 8);
 
-export default function FeaturedServiceGrid({ onSelect }: FeaturedServiceGridProps) {
   return (
     <View className="mt-6">
-      <View className="px-4 flex-row items-center justify-between mb-3">
+      <View className="mb-3 flex-row items-center justify-between px-4">
         <View className="flex-row items-center gap-2">
-          <View className="w-1.5 h-6 rounded-full bg-primary" />
-          <Text className="font-bold text-xl text-foreground">Dịch vụ nổi bật</Text>
+          <View className="h-6 w-1.5 rounded-full bg-primary" />
+          <Text className="text-xl font-bold text-foreground">
+            Dịch vụ nổi bật
+          </Text>
         </View>
-        <TouchableOpacity onPress={() => {}} className="flex-row items-center gap-1">
-          <Text className="text-primary text-sm font-medium">Xem tất cả</Text>
+        <View className="flex-row items-center gap-1">
+          <Text className="text-sm font-medium text-primary">
+            {visibleServices.length} dịch vụ
+          </Text>
           <ChevronRight size={14} color="#1a5fd4" strokeWidth={2.5} />
-        </TouchableOpacity>
+        </View>
       </View>
 
-      {/* Horizontal scroll với 6 dịch vụ trên 1 hàng */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingLeft: 16, paddingRight: 16 }}
-      >
-        {SERVICES.map((service) => {
-          const Icon = service.icon;
-          return (
-            <TouchableOpacity
-              key={service.id}
-              onPress={() => onSelect?.(service)}
-              activeOpacity={0.8}
-              style={{ width: CARD_WIDTH_HORIZONTAL }}
-              className="mr-3 bg-card rounded-2xl border border-border p-3 items-center"
-            >
-              {/* Icon Container */}
-              <View
-                className="w-12 h-12 rounded-xl items-center justify-center mb-2"
-                style={{ backgroundColor: service.bgColor }}
+      {visibleServices.length === 0 ? (
+        <View className="mx-4 rounded-2xl border border-dashed border-border bg-card p-5">
+          <Text className="text-center text-sm text-muted-foreground">
+            Chưa có dịch vụ khả dụng.
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingLeft: 16, paddingRight: 16 }}
+        >
+          {visibleServices.map((service, index) => {
+            const Icon = ICONS[index % ICONS.length];
+            const palette = PALETTES[index % PALETTES.length];
+            return (
+              <TouchableOpacity
+                key={service.id}
+                onPress={() => onSelect?.(service)}
+                activeOpacity={0.8}
+                style={{ width: CARD_WIDTH }}
+                className="mr-3 rounded-2xl border border-border bg-card p-3"
               >
-                <Icon size={24} color={service.color} strokeWidth={1.8} />
-              </View>
-              {/* Service Name */}
-              <Text
-                className="font-bold text-sm text-foreground text-center leading-tight mb-1"
-                numberOfLines={1}
-              >
-                {service.name}
-              </Text>
-              {/* Short Description */}
-              <Text
-                className="text-[10px] text-muted-foreground text-center leading-tight"
-                numberOfLines={2}
-              >
-                {service.description}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+                <View
+                  className="mb-2 h-12 w-12 items-center justify-center rounded-xl"
+                  style={{ backgroundColor: palette.backgroundColor }}
+                >
+                  <Icon
+                    size={24}
+                    color={palette.color}
+                    strokeWidth={1.8}
+                  />
+                </View>
+                <Text
+                  className="text-sm font-bold leading-tight text-foreground"
+                  numberOfLines={2}
+                >
+                  {service.name}
+                </Text>
+                <Text
+                  className="mt-1 text-[10px] leading-tight text-muted-foreground"
+                  numberOfLines={2}
+                >
+                  {service.description || `${service.duration_minutes} phút`}
+                </Text>
+                {typeof service.rating_average === "number" ? (
+                  <View className="mt-2 flex-row items-center gap-1">
+                    <Star
+                      size={11}
+                      color="#f59e0b"
+                      fill="#f59e0b"
+                      strokeWidth={1.8}
+                    />
+                    <Text className="text-[11px] font-bold text-foreground">
+                      {service.rating_average.toFixed(1)}
+                    </Text>
+                    <Text className="text-[10px] text-muted-foreground">
+                      ({service.rating_count ?? 0})
+                    </Text>
+                  </View>
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      )}
     </View>
   );
 }
-
-export { SERVICES };

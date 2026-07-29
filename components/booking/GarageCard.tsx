@@ -76,7 +76,6 @@ export default function GarageCard({
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
-        activeOpacity={0.85}
         className={`relative bg-card rounded-xl border-2 overflow-hidden ${
           selected ? "border-primary" : "border-border"
         }`}

@@ -24,6 +24,7 @@ import {
   Info,
   KeyRound,
   LogOut,
+  MessageSquareText,
   Pencil,
   Phone,
   Settings as SettingsIcon,
@@ -250,6 +251,11 @@ export default function ProfileScreen() {
         label: "Lịch sử rửa xe",
         value: `${histories.length}`,
         onPress: () => router.push("/history"),
+      },
+      {
+        icon: MessageSquareText,
+        label: "Đánh giá của tôi",
+        onPress: () => router.push("/reviews"),
       },
       {
         icon: Hourglass,

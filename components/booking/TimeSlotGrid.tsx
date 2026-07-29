@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import { View, Text, TouchableOpacity, Animated } from "react-native";
-import { Check, Clock4, X, CalendarDays } from "lucide-react-native";
+import { Check, Clock4, X } from "lucide-react-native";
 
-type SlotState = "selected" | "available" | "booked";
+type SlotState = "preview" | "selected" | "available" | "unavailable";
 
 interface TimeSlot {
   id: string;
   label: string;
+  detail: string;
   state: SlotState;
 }
 
@@ -49,7 +50,7 @@ function SlotButton({ slot, index, onPress }: SlotButtonProps) {
   }, [index, opacity, scale]);
 
   const handlePressIn = () => {
-    if (slot.state === "booked") return;
+    if (slot.state === "preview" || slot.state === "unavailable") return;
     Animated.spring(press, {
       toValue: 0.95,
       damping: 14,
@@ -65,11 +66,13 @@ function SlotButton({ slot, index, onPress }: SlotButtonProps) {
     }).start();
   };
 
-  const disabled = slot.state === "booked";
+  const disabled = slot.state === "preview" || slot.state === "unavailable";
+  const isUnavailable = slot.state === "unavailable";
+  const isPreview = slot.state === "preview";
   const isSelected = slot.state === "selected";
   const containerStyle = {
     transform: [{ scale: Animated.multiply(scale, press) }],
-    opacity: disabled ? 0.45 : opacity,
+    opacity: disabled ? (isPreview ? 0.68 : 0.45) : opacity,
   };
 
   return (
@@ -82,12 +85,15 @@ function SlotButton({ slot, index, onPress }: SlotButtonProps) {
         onPress={onPress}
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
+        accessibilityRole="button"
+        accessibilityState={{ disabled, selected: isSelected }}
+        accessibilityLabel={`${slot.label}, ${slot.detail}`}
         className={`relative bg-card rounded-xl border-2 px-3 py-3 items-center justify-center min-h-[72px] ${
           isSelected ? "border-primary" : "border-border"
         }`}
       >
         <View className="mb-1.5">
-          {disabled ? (
+          {isUnavailable ? (
             <X size={14} color="#9ca3af" strokeWidth={2.4} />
           ) : (
             <Clock4
@@ -104,13 +110,13 @@ function SlotButton({ slot, index, onPress }: SlotButtonProps) {
           }`}
           numberOfLines={1}
         >
-          {slot.label.split(" - ")[0]}
+          {slot.label}
         </Text>
         <Text
-          className={`text-[10px] mt-0.5 text-muted-foreground`}
+          className="text-[10px] mt-0.5 text-muted-foreground"
           numberOfLines={1}
         >
-          {disabled ? "Đã đặt" : slot.label.split(" - ")[1] ?? ""}
+          {slot.detail}
         </Text>
 
         {isSelected ? (
@@ -126,17 +132,20 @@ function SlotButton({ slot, index, onPress }: SlotButtonProps) {
 export default function TimeSlotGrid({ slots, onSelect }: TimeSlotGridProps) {
   if (slots.length === 0) return null;
 
-  const availableCount = slots.filter((s) => s.state === "available").length;
+  const isPreview = slots.every((slot) => slot.state === "preview");
+  const availableCount = slots.filter(
+    (slot) => slot.state === "available" || slot.state === "selected"
+  ).length;
 
   return (
     <View className="px-4 mb-6">
       <View className="flex-row items-center gap-2 mb-3">
         <View className="w-1.5 h-6 rounded-full bg-primary" />
         <Text className="font-bold text-xl text-foreground flex-1">
-          Khung giờ trống
+          {isPreview ? "Khung giờ tham khảo" : "Khung giờ đặt lịch"}
         </Text>
         <Text className="text-xs text-muted-foreground">
-          {availableCount} khung còn trống
+          {isPreview ? "Chưa kiểm tra" : `${availableCount} khung còn trống`}
         </Text>
       </View>
 

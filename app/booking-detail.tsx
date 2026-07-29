@@ -547,6 +547,14 @@ export default function BookingDetailScreen() {
     });
   };
 
+  const handleOpenReview = () => {
+    if (!booking) return;
+    router.push({
+      pathname: "/review/[bookingId]",
+      params: { bookingId: booking.id },
+    });
+  };
+
   const handleShare = async () => {
     if (!booking) return;
     const shortId = booking.id.slice(0, 8).toUpperCase();
@@ -683,7 +691,11 @@ export default function BookingDetailScreen() {
   const canCancel =
     booking && (booking.status === "PENDING" || booking.status === "CONFIRMED");
   const canRebook = booking && booking.status === "COMPLETED";
-  const canReview = booking && booking.status === "COMPLETED";
+  const canSurvey = booking && booking.status === "COMPLETED";
+  const canReview =
+    booking &&
+    booking.status === "COMPLETED" &&
+    (booking.payment_status === "PAID" || booking.payment_status === "WAIVED");
   const isPayosPending =
     payosPayment &&
     (payosPayment.status === "PENDING" ||
@@ -1339,13 +1351,31 @@ export default function BookingDetailScreen() {
           ) : null}
           {canReview ? (
             <TouchableOpacity
+              onPress={handleOpenReview}
+              activeOpacity={0.85}
+              className="rounded-2xl bg-primary py-3.5 flex-row items-center justify-center gap-2"
+            >
+              <Star
+                size={16}
+                color="#ffffff"
+                fill="#ffffff"
+                strokeWidth={2.2}
+              />
+              <Text className="text-white font-semibold text-sm">
+                Đánh giá garage và dịch vụ
+              </Text>
+              <ExternalLink size={14} color="#ffffff" strokeWidth={2.4} />
+            </TouchableOpacity>
+          ) : null}
+          {canSurvey ? (
+            <TouchableOpacity
               onPress={handleOpenSurvey}
               activeOpacity={0.85}
               className="rounded-2xl bg-card border border-border py-3.5 flex-row items-center justify-center gap-2"
             >
-              <Star size={16} color="#1a5fd4" strokeWidth={2.2} />
+              <ClipboardList size={16} color="#1a5fd4" strokeWidth={2.2} />
               <Text className="text-primary font-semibold text-sm">
-                Đánh giá dịch vụ
+                Khảo sát trải nghiệm
               </Text>
               <ExternalLink size={14} color="#1a5fd4" strokeWidth={2.4} />
             </TouchableOpacity>

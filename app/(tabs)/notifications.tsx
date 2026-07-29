@@ -36,6 +36,7 @@ export default function NotificationsTab() {
       related_id: item.related_id ?? undefined,
       notification_id: item.id,
       type: item.type,
+      metadata: item.metadata ?? undefined,
     });
   };
 

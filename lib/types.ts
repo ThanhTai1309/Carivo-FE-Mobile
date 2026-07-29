@@ -119,6 +119,8 @@ export interface ServicePackage {
   image_url?: string | null;
   display_price?: number | null;
   discount_percentage?: number | null;
+  rating_average?: number | null;
+  rating_count?: number | null;
 }
 
 export interface PriceQuote {
@@ -683,15 +685,92 @@ export interface FavoriteGarage {
   garage?: Garage | null;
 }
 
+export type ReviewModerationStatus = "PUBLISHED" | "HIDDEN" | string;
+export type ReviewSort = "NEWEST" | "HIGHEST" | "LOWEST";
+
+export interface ReviewUpload {
+  id: string;
+  url: string;
+  mime_type?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+export interface ReviewGarageReply {
+  content: string;
+  replied_by_id?: string;
+  replied_by?: {
+    id?: string;
+    full_name?: string | null;
+    avatar_url?: string | null;
+    role?: string | null;
+  } | null;
+  replied_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface GarageReview {
   id: string;
   garage_id: string;
   booking_id?: string | null;
-  customer_id?: string;
+  wash_history_id?: string | null;
+  customer_id?: string | null;
+  service_package_id?: string | null;
+  garage?: {
+    id: string;
+    name?: string | null;
+    garage_code?: string | null;
+    address?: string | null;
+    city?: string | null;
+  } | null;
+  service_package?: {
+    id: string;
+    name?: string | null;
+    service_code?: string | null;
+    vehicle_type?: string | null;
+    service_type?: string | null;
+  } | null;
+  garage_rating: number;
+  service_rating: number;
   rating: number;
   comment?: string | null;
+  upload_ids?: string[];
+  uploads?: ReviewUpload[];
+  is_anonymous?: boolean;
+  moderation_status?: ReviewModerationStatus;
+  moderation_reason?: string | null;
+  moderation_note?: string | null;
+  garage_reply?: ReviewGarageReply | null;
+  deleted_at?: string | null;
   created_at: string;
+  updated_at?: string | null;
   customer?: Pick<UserPublic, "id" | "full_name" | "avatar_url"> | null;
+}
+
+export interface ReviewSummary {
+  rating_average: number;
+  rating_count: number;
+  distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+}
+
+export interface ReviewEligibility {
+  eligible: boolean;
+  reason_code?: string | null;
+  review?: GarageReview | null;
+  context?: {
+    booking_id: string;
+    wash_history_id: string;
+    garage_id: string;
+    service_package_id: string;
+  } | null;
+}
+
+export interface ReviewMutationPayload {
+  garage_rating: number;
+  service_rating: number;
+  comment?: string | null;
+  upload_ids: string[];
+  is_anonymous: boolean;
 }
 
 export type CustomerCaseType =

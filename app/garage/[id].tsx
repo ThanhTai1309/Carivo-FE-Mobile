@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -23,9 +23,16 @@ import {
   ThumbsUp,
 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
+import ReviewCard from "@/components/reviews/ReviewCard";
+import ReviewSummaryCard from "@/components/reviews/ReviewSummaryCard";
 import { api, ApiError } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
-import type { Garage, GarageReview, ServicePackage } from "@/lib/types";
+import type {
+  Garage,
+  GarageReview,
+  ReviewSummary,
+  ServicePackage,
+} from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
 function openMap(garage: Garage) {
@@ -47,6 +54,11 @@ export default function GarageDetailScreen() {
   const [garage, setGarage] = useState<Garage | null>(null);
   const [services, setServices] = useState<ServicePackage[]>([]);
   const [reviews, setReviews] = useState<GarageReview[]>([]);
+  const [summary, setSummary] = useState<ReviewSummary>({
+    rating_average: 0,
+    rating_count: 0,
+    distribution: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 },
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -55,19 +67,34 @@ export default function GarageDetailScreen() {
   const loadData = useCallback(async () => {
     if (!garageId) return;
     try {
-      const [garageResponse, servicesResponse, reviewsResponse] =
+      const [
+        garageResponse,
+        servicesResponse,
+        reviewsResponse,
+        summaryResponse,
+      ] =
         await Promise.all([
           api.getGarage(garageId),
           api.getServicePackages({
             garage_id: garageId,
-            is_active: true,
             limit: 50,
           }),
-          api.getGarageReviews(garageId, { limit: 20 }),
+          api.getGarageReviews(garageId, { limit: 20, sort: "NEWEST" }),
+          api.getGarageReviewSummary(garageId).catch(() => null),
         ]);
       setGarage(garageResponse.data);
       setServices(servicesResponse.data ?? []);
       setReviews(reviewsResponse.data ?? []);
+      if (summaryResponse?.data) {
+        setSummary(summaryResponse.data);
+      } else {
+        setSummary((current) => ({
+          ...current,
+          rating_average: garageResponse.data.rating_average ?? 0,
+          rating_count:
+            garageResponse.data.rating_count ?? reviewsResponse.data?.length ?? 0,
+        }));
+      }
     } catch (error) {
       const message =
         error instanceof ApiError
@@ -127,13 +154,7 @@ export default function GarageDetailScreen() {
     }
   };
 
-  const rating = useMemo(() => {
-    if (typeof garage?.rating_average === "number") return garage.rating_average;
-    if (reviews.length === 0) return 0;
-    return (
-      reviews.reduce((sum, r) => sum + (r.rating ?? 0), 0) / reviews.length
-    );
-  }, [garage, reviews]);
+  const rating = summary.rating_average || garage?.rating_average || 0;
 
   if (loading) {
     return (
@@ -248,14 +269,9 @@ export default function GarageDetailScreen() {
                 {rating.toFixed(1)}
               </Text>
               <Text className="text-[11px] text-muted-foreground">
-                ({reviews.length})
+                ({summary.rating_count})
               </Text>
             </View>
-            {garage.rating_count ? (
-              <Text className="text-xs text-muted-foreground">
-                {garage.rating_count} lượt đánh giá
-              </Text>
-            ) : null}
           </View>
 
           {garage.description ? (
@@ -349,10 +365,9 @@ export default function GarageDetailScreen() {
                       key={service.id}
                       onPress={() =>
                         router.push({
-                          pathname: "/(tabs)/booking",
+                          pathname: "/service/[id]",
                           params: {
-                            garageId: garage.id,
-                            servicePackageId: service.id,
+                            id: service.id,
                           },
                         })
                       }
@@ -382,6 +397,20 @@ export default function GarageDetailScreen() {
                               ~{service.duration_minutes} phút
                             </Text>
                           ) : null}
+                          {typeof service.rating_average === "number" ? (
+                            <View className="flex-row items-center gap-1">
+                              <Star
+                                size={11}
+                                color="#f59e0b"
+                                fill="#f59e0b"
+                                strokeWidth={1.8}
+                              />
+                              <Text className="text-[11px] text-muted-foreground">
+                                {service.rating_average.toFixed(1)} (
+                                {service.rating_count ?? 0})
+                              </Text>
+                            </View>
+                          ) : null}
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -400,11 +429,15 @@ export default function GarageDetailScreen() {
                 </Text>
               </View>
               <Text className="text-xs text-muted-foreground">
-                {reviews.length} đánh giá
+                {summary.rating_count} đánh giá
               </Text>
             </View>
+            <ReviewSummaryCard
+              summary={summary}
+              title="Điểm chất lượng garage"
+            />
             {reviews.length === 0 ? (
-              <View className="rounded-2xl border border-dashed border-border bg-card p-4 items-center gap-2">
+              <View className="mt-3 rounded-2xl border border-dashed border-border bg-card p-4 items-center gap-2">
                 <Star size={22} color="#94a3b8" strokeWidth={1.6} />
                 <Text className="text-xs text-muted-foreground text-center">
                   Chưa có đánh giá nào. Hãy là người đầu tiên đánh giá dịch vụ của
@@ -412,56 +445,9 @@ export default function GarageDetailScreen() {
                 </Text>
               </View>
             ) : (
-              <View className="gap-3">
+              <View className="mt-3 gap-3">
                 {reviews.map((review) => (
-                  <View
-                    key={review.id}
-                    className="rounded-2xl bg-card border border-border p-4"
-                  >
-                    <View className="flex-row items-center gap-3">
-                      <View className="w-9 h-9 rounded-full bg-secondary items-center justify-center">
-                        <Text className="text-xs font-bold text-primary">
-                          {(review.customer?.full_name ?? "K")
-                            .slice(0, 1)
-                            .toUpperCase()}
-                        </Text>
-                      </View>
-                      <View className="flex-1">
-                        <Text className="text-sm font-semibold text-foreground">
-                          {review.customer?.full_name ?? "Khách hàng"}
-                        </Text>
-                        <View className="flex-row items-center gap-0.5 mt-0.5">
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <Star
-                              key={n}
-                              size={12}
-                              color={
-                                n <= (review.rating ?? 0) ? "#f59e0b" : "#cbd5e1"
-                              }
-                              strokeWidth={2}
-                              fill={
-                                n <= (review.rating ?? 0)
-                                  ? "#f59e0b"
-                                  : "transparent"
-                              }
-                            />
-                          ))}
-                        </View>
-                      </View>
-                      <Text className="text-[11px] text-muted-foreground">
-                        {review.created_at
-                          ? new Date(review.created_at).toLocaleDateString(
-                              "vi-VN"
-                            )
-                          : ""}
-                      </Text>
-                    </View>
-                    {review.comment ? (
-                      <Text className="text-sm text-foreground mt-2 leading-relaxed">
-                        {review.comment}
-                      </Text>
-                    ) : null}
-                  </View>
+                  <ReviewCard key={review.id} review={review} />
                 ))}
               </View>
             )}

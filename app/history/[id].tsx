@@ -20,6 +20,7 @@ import {
   MapPin,
   Receipt,
   Repeat,
+  Star,
   TimerReset,
   Wrench,
 } from "lucide-react-native";
@@ -306,6 +307,19 @@ function HistoryDetailScreen() {
               }
               icon={Repeat}
               variant="primary"
+            />
+          ) : null}
+          {history.booking_id ? (
+            <LoadingButton
+              title="Đánh giá garage và dịch vụ"
+              onPress={() =>
+                router.push({
+                  pathname: "/review/[bookingId]",
+                  params: { bookingId: history.booking_id },
+                })
+              }
+              icon={Star}
+              variant="secondary"
             />
           ) : null}
         </View>

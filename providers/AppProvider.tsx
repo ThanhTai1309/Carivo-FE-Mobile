@@ -31,7 +31,8 @@ export type UploadPurpose =
   | "VEHICLE_PHOTO"
   | "BOOKING_PROBLEM"
   | "CUSTOMER_CASE_EVIDENCE"
-  | "HANDOVER_DOCUMENT";
+  | "HANDOVER_DOCUMENT"
+  | "REVIEW";
 
 export interface UploadedFile {
   id: string;

@@ -14,7 +14,13 @@ import SectionHeader from "@/components/home/SectionHeader";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
 import { compactName, minutesUntil, toDateInputValue } from "@/lib/format";
-import type { Garage, Promotion, ServicePackage, Vehicle } from "@/lib/types";
+import type {
+  Garage,
+  GarageReview,
+  Promotion,
+  ServicePackage,
+  Vehicle,
+} from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
 export default function HomeScreen() {
@@ -23,6 +29,7 @@ export default function HomeScreen() {
   const [garages, setGarages] = useState<Garage[]>([]);
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [services, setServices] = useState<ServicePackage[]>([]);
+  const [reviews, setReviews] = useState<GarageReview[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loyaltyPoints, setLoyaltyPoints] = useState("0");
   const [waitMinutes, setWaitMinutes] = useState(0);
@@ -37,7 +44,7 @@ export default function HomeScreen() {
         await Promise.all([
           api.getGarages({ limit: 4 }),
           api.getPromotions({ limit: 5 }),
-          api.getServicePackages({ limit: 3 }),
+          api.getServicePackages({ limit: 20 }),
         ]);
 
       const fetchedGarages = garagesResponse.data ?? [];
@@ -45,6 +52,26 @@ export default function HomeScreen() {
       setGarages(fetchedGarages);
       setPromotions(promotionsResponse.data ?? []);
       setServices(fetchedServices);
+
+      const reviewResponses = await Promise.all(
+        fetchedGarages.slice(0, 4).map((garage) =>
+          api
+            .getGarageReviews(garage.id, {
+              limit: 5,
+              has_comment: true,
+              sort: "NEWEST",
+            })
+            .catch(() => null)
+        )
+      );
+      const publicReviews = reviewResponses
+        .flatMap((response) => response?.data ?? [])
+        .filter(
+          (review, index, list) =>
+            list.findIndex((item) => item.id === review.id) === index
+        )
+        .slice(0, 8);
+      setReviews(publicReviews);
 
       if (isAuthenticated && accessToken) {
         const [vehiclesResponse, loyaltyResponse] = await Promise.all([
@@ -208,13 +235,24 @@ export default function HomeScreen() {
           onAddCar={() => router.push(isAuthenticated ? "/my-vehicles" : "/login")}
         />
         {/* Dịch vụ nổi bật */}
-        <FeaturedServiceGrid onSelect={handleServiceSelect} />
+        <FeaturedServiceGrid
+          services={services}
+          onSelect={handleServiceSelect}
+        />
 
         {/* Combo đặc biệt */}
         <ComboSection onSelect={handleComboSelect} />
 
         {/* Đánh giá khách hàng */}
-        <CustomerReviews />
+        <CustomerReviews
+          reviews={reviews}
+          onSelect={(review) =>
+            router.push({
+              pathname: "/garage/[id]",
+              params: { id: review.garage_id },
+            })
+          }
+        />
 
         {/* Tin tức & Sự kiện */}
         <NewsSection onSelect={handleNewsSelect} />

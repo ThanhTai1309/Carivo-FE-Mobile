@@ -24,6 +24,10 @@ import type {
   PhoneVerificationChallenge,
   PhoneVerificationToken,
   Promotion,
+  ReviewEligibility,
+  ReviewMutationPayload,
+  ReviewSort,
+  ReviewSummary,
   ServicePackage,
   Survey,
   SurveyQuestion,
@@ -35,7 +39,9 @@ import type {
   WashHistoryClaimResult,
 } from "@/lib/types";
 
-const API_ROOT = "https://wdp301-project-backend.onrender.com/api/v1";
+const API_ROOT =
+  process.env.EXPO_PUBLIC_API_URL?.replace(/\/$/, "") ??
+  "https://wdp301-project-backend.onrender.com/api/v1";
 
 export type QueryValue = string | number | boolean | null | undefined | string[];
 
@@ -590,7 +596,7 @@ export const api = {
       ApiEnvelope<{
         voucher: CustomerVoucher;
         discount_amount: number;
-        final_price: number;
+        final_amount: number;
       }>
     >("/customer-vouchers/validate", {
       method: "POST",
@@ -629,10 +635,44 @@ export const api = {
     );
   },
 
+  getGarageReviewSummary(garageId: string) {
+    return request<ApiEnvelope<ReviewSummary>>(
+      `/garages/${garageId}/review-summary`
+    );
+  },
+
+  getServicePackageReviews(
+    servicePackageId: string,
+    query?: Record<string, QueryValue> & {
+      rating?: number;
+      has_comment?: boolean;
+      sort?: ReviewSort;
+    }
+  ) {
+    return request<ApiEnvelope<GarageReview[]>>(
+      `/service-packages/${servicePackageId}/reviews`,
+      { query }
+    );
+  },
+
+  getServicePackageReviewSummary(servicePackageId: string) {
+    return request<ApiEnvelope<ReviewSummary>>(
+      `/service-packages/${servicePackageId}/review-summary`
+    );
+  },
+
   createGarageReview(
     token: string,
     garageId: string,
-    body: { booking_id: string; rating: number; comment?: string }
+    body: {
+      booking_id: string;
+      rating?: number;
+      garage_rating?: number;
+      service_rating?: number;
+      comment?: string | null;
+      upload_ids?: string[];
+      is_anonymous?: boolean;
+    }
   ) {
     return request<ApiEnvelope<GarageReview>>(
       `/garages/${garageId}/reviews`,
@@ -642,6 +682,64 @@ export const api = {
         body,
       }
     );
+  },
+
+  getReviewEligibility(token: string, bookingId: string) {
+    return request<ApiEnvelope<ReviewEligibility>>("/reviews/eligibility", {
+      token,
+      query: { booking_id: bookingId },
+    });
+  },
+
+  createReview(
+    token: string,
+    body: ReviewMutationPayload & { booking_id: string }
+  ) {
+    return request<ApiEnvelope<GarageReview>>("/reviews", {
+      method: "POST",
+      token,
+      body: { ...body },
+    });
+  },
+
+  getMyReviews(
+    token: string,
+    query?: Record<string, QueryValue> & {
+      garage_id?: string;
+      service_package_id?: string;
+      moderation_status?: string;
+    }
+  ) {
+    return request<ApiEnvelope<GarageReview[]>>("/reviews/mine", {
+      token,
+      query,
+    });
+  },
+
+  getMyReviewByBooking(token: string, bookingId: string) {
+    return request<ApiEnvelope<GarageReview>>(
+      `/reviews/by-booking/${bookingId}`,
+      { token }
+    );
+  },
+
+  updateMyReview(
+    token: string,
+    reviewId: string,
+    body: Partial<ReviewMutationPayload>
+  ) {
+    return request<ApiEnvelope<GarageReview>>(`/reviews/${reviewId}`, {
+      method: "PATCH",
+      token,
+      body,
+    });
+  },
+
+  deleteMyReview(token: string, reviewId: string) {
+    return request<ApiEnvelope<GarageReview>>(`/reviews/${reviewId}`, {
+      method: "DELETE",
+      token,
+    });
   },
 
   // ===== Customer Cases =====
