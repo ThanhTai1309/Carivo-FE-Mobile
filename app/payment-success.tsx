@@ -276,16 +276,23 @@ export default function PaymentSuccessScreen() {
   const isFailed =
     pollState === "FAILED" || pollState === "EXPIRED" || pollState === "CANCELED";
 
-  const heroTitle = isPaid
-    ? "Thanh toán thành công!"
-    : isPending
-      ? "Đang chờ thanh toán..."
-      : "Thanh toán chưa hoàn tất";
-  const heroDescription = isPaid
-    ? "Cảm ơn bạn đã thanh toán. Chúng tôi sẽ xử lý lịch hẹn của bạn ngay."
-    : isPending
-      ? "Hệ thống đang chờ PayOS xác nhận. Bạn có thể đóng app và quay lại sau, hoặc kéo xuống để làm mới."
-      : "Thanh toán chưa hoàn tất. Vui lòng thử lại hoặc chọn phương thức khác.";
+  // Với CASH chưa có transaction PayOS → pollState mặc định = "PAID"
+  // nhưng hero copy phải là "Đặt lịch thành công" (không phải "Thanh toán thành công").
+  const isCashFlow = !isPayosFlow;
+  const heroTitle = isCashFlow
+    ? "Đặt lịch thành công!"
+    : isPaid
+      ? "Thanh toán thành công!"
+      : isPending
+        ? "Đang chờ thanh toán..."
+        : "Thanh toán chưa hoàn tất";
+  const heroDescription = isCashFlow
+    ? "Lịch hẹn đã được tạo. Bạn sẽ thanh toán trực tiếp tại garage khi đến."
+    : isPaid
+      ? "Cảm ơn bạn đã thanh toán. Chúng tôi sẽ xử lý lịch hẹn của bạn ngay."
+      : isPending
+        ? "Hệ thống đang chờ PayOS xác nhận. Bạn có thể đóng app và quay lại sau, hoặc kéo xuống để làm mới."
+        : "Thanh toán chưa hoàn tất. Vui lòng thử lại hoặc chọn phương thức khác.";
 
   const handleShare = async () => {
     if (!params.bookingId) return;

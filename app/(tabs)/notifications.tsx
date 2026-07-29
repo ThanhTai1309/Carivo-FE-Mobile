@@ -14,6 +14,7 @@ import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { resolveDeepLink } from "@/lib/deepLinks";
+import { localizeNotification } from "@/lib/notificationsI18n";
 import type { NotificationItem } from "@/lib/types";
 import { isUnreadNotification } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
@@ -185,6 +186,7 @@ export default function NotificationsTab() {
             notifications.map((item) => {
               const unread = isUnreadNotification(item);
               const target = resolveTarget(item);
+              const localized = localizeNotification(item);
               return (
                 <TouchableOpacity
                   key={item.id}
@@ -208,10 +210,10 @@ export default function NotificationsTab() {
                   </View>
                   <View className="flex-1">
                     <Text className="font-semibold text-foreground">
-                      {item.title}
+                      {localized.title}
                     </Text>
                     <Text className="text-sm text-muted-foreground mt-1 leading-5">
-                      {item.message}
+                      {localized.message}
                     </Text>
                     <View className="flex-row items-center justify-between mt-3">
                       <Text className="text-xs text-muted-foreground">

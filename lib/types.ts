@@ -602,40 +602,79 @@ export interface Survey {
   response_expires_at?: string | null;
 }
 
-export type VoucherKind = "DISCOUNT" | "FREE_SERVICE" | "CASHBACK" | string;
+export type VoucherType =
+  | "PERCENTAGE"
+  | "FIXED_AMOUNT"
+  | "FREE_SERVICE"
+  | string;
+
 export type VoucherStatus =
-  | "ACTIVE"
-  | "REDEEMED"
+  | "PENDING_APPROVAL"
+  | "ISSUED"
+  | "RESERVED"
+  | "USED"
   | "EXPIRED"
-  | "CANCELED"
+  | "REVOKED"
   | string;
-export type VoucherSource =
+
+export type VoucherSourceType =
+  | "INCIDENT"
+  | "CUSTOMER_CASE"
   | "ADMIN_GIFT"
-  | "PROMOTION_REWARD"
-  | "LOYALTY_REDEEM"
-  | "COMPENSATION"
   | string;
+
+export interface CustomerVoucherServicePackageRef {
+  id: string;
+  name?: string;
+  service_type?: string;
+  vehicle_type?: string;
+  base_price?: number;
+}
+
+export interface CustomerVoucherGarageRef {
+  id: string;
+  name?: string;
+  garage_code?: string;
+}
+
+export interface CustomerVoucherCustomerRef {
+  id: string;
+  full_name?: string;
+  email?: string;
+  phone?: string;
+}
 
 export interface CustomerVoucher {
   id: string;
-  customer_id?: string;
   code: string;
-  name?: string | null;
-  kind?: VoucherKind | null;
-  discount_type?: "PERCENTAGE" | "FIXED_AMOUNT" | null;
-  discount_value?: number | null;
+  customer_id?: string | null;
+  garage_id?: string | null;
+  customer?: CustomerVoucherCustomerRef | null;
+  garage?: CustomerVoucherGarageRef | null;
+  source_type?: VoucherSourceType | null;
+  source_booking_id?: string | null;
+  source_incident_id?: string | null;
+  source_customer_case_id?: string | null;
+  source_customer_case_resolution_id?: string | null;
+  voucher_type?: VoucherType | null;
+  value?: number | null;
   max_discount_amount?: number | null;
   min_order_amount?: number | null;
-  applicable_service_package_ids?: string[];
-  applicable_vehicle_types?: VehicleType[];
-  source?: VoucherSource | null;
+  service_package_id?: string | null;
+  service_package?: CustomerVoucherServicePackageRef | null;
   status?: VoucherStatus | null;
-  issued_at?: string;
   expires_at?: string | null;
-  redeemed_at?: string | null;
-  redeemed_booking_id?: string | null;
-  is_active?: boolean;
-  description?: string | null;
+  note?: string | null;
+  issued_by_id?: string | null;
+  approved_by_id?: string | null;
+  approved_at?: string | null;
+  reserved_booking_id?: string | null;
+  reserved_at?: string | null;
+  used_at?: string | null;
+  revoked_at?: string | null;
+  revoked_by_id?: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface FavoriteGarage {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
+  Modal,
+  Pressable,
   RefreshControl,
   ScrollView,
   Text,
@@ -15,40 +16,75 @@ import {
   Clock,
   Gift,
   Sparkles,
-  TicketPercent,
   Ticket,
+  TicketPercent,
   Wallet,
+  X,
 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
-import type { CustomerVoucher, VoucherStatus } from "@/lib/types";
+import type { CustomerVoucher, Promotion } from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
-type Tab = "ACTIVE" | "REDEEMED" | "EXPIRED";
+type VoucherUiStatus =
+  | "AVAILABLE"
+  | "RESERVED"
+  | "PENDING"
+  | "USED"
+  | "EXPIRED"
+  | "REVOKED";
 
-const TAB_LABELS: Record<Tab, string> = {
-  ACTIVE: "Có thể dùng",
-  REDEEMED: "Đã dùng",
+const STATUS_LABEL: Record<VoucherUiStatus, string> = {
+  AVAILABLE: "Có thể dùng",
+  RESERVED: "Đang giữ chỗ",
+  PENDING: "Chờ duyệt",
+  USED: "Đã dùng",
   EXPIRED: "Hết hạn",
+  REVOKED: "Đã thu hồi",
 };
 
-function formatVoucherValue(voucher: CustomerVoucher): string {
-  if (
-    voucher.discount_type === "PERCENTAGE" &&
-    typeof voucher.discount_value === "number"
-  ) {
-    const max = voucher.max_discount_amount ?? null;
-    const head = `Giảm ${voucher.discount_value}%`;
-    return max ? `${head} · Tối đa ${formatCurrency(max)}` : head;
-  }
-  if (typeof voucher.discount_value === "number") {
-    return `Giảm ${formatCurrency(voucher.discount_value)}`;
-  }
-  if (voucher.kind === "FREE_SERVICE") return "Miễn phí dịch vụ";
-  if (voucher.kind === "CASHBACK") return "Hoàn tiền";
-  return "Ưu đãi đặc biệt";
-}
+const STATUS_STYLE: Record<
+  VoucherUiStatus,
+  { bg: string; text: string; border: string; muted: boolean }
+> = {
+  AVAILABLE: {
+    bg: "bg-emerald-50",
+    text: "text-emerald-700",
+    border: "border-emerald-200",
+    muted: false,
+  },
+  RESERVED: {
+    bg: "bg-blue-50",
+    text: "text-blue-700",
+    border: "border-blue-200",
+    muted: false,
+  },
+  PENDING: {
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    border: "border-amber-200",
+    muted: false,
+  },
+  USED: {
+    bg: "bg-muted",
+    text: "text-muted-foreground",
+    border: "border-border",
+    muted: true,
+  },
+  EXPIRED: {
+    bg: "bg-red-50",
+    text: "text-red-700",
+    border: "border-red-200",
+    muted: true,
+  },
+  REVOKED: {
+    bg: "bg-red-50",
+    text: "text-red-700",
+    border: "border-red-200",
+    muted: true,
+  },
+};
 
 function daysUntil(iso?: string | null): number | null {
   if (!iso) return null;
@@ -57,134 +93,484 @@ function daysUntil(iso?: string | null): number | null {
   return Math.ceil((t - Date.now()) / (24 * 60 * 60 * 1000));
 }
 
+function formatPromotionValue(p: Promotion): string {
+  const max = p.max_discount_amount ?? null;
+  if (p.discount_type === "PERCENTAGE") {
+    const head = `Giảm ${p.discount_value}%`;
+    return max ? `${head} · Tối đa ${formatCurrency(max)}` : head;
+  }
+  const head = `Giảm ${formatCurrency(p.discount_value)}`;
+  return max ? `${head} · Tối đa ${formatCurrency(max)}` : head;
+}
+
+function resolveVoucherStatus(voucher: CustomerVoucher): VoucherUiStatus {
+  if (voucher.status === "REVOKED") return "REVOKED";
+  if (voucher.status === "USED") return "USED";
+  if (voucher.status === "RESERVED") return "RESERVED";
+  if (voucher.status === "PENDING_APPROVAL") return "PENDING";
+  if (voucher.status === "EXPIRED") return "EXPIRED";
+  if (voucher.expires_at) {
+    const t = new Date(voucher.expires_at).getTime();
+    if (!Number.isNaN(t) && t < Date.now()) return "EXPIRED";
+  }
+  return "AVAILABLE";
+}
+
+function resolvePromotionStatus(p: Promotion): VoucherUiStatus {
+  if (p.is_active === false) return "EXPIRED";
+  const now = Date.now();
+  if (p.start_at) {
+    const s = new Date(p.start_at).getTime();
+    if (!Number.isNaN(s) && now < s) return "PENDING";
+  }
+  if (p.end_at) {
+    const e = new Date(p.end_at).getTime();
+    if (!Number.isNaN(e) && now > e) return "EXPIRED";
+  }
+  if (
+    typeof p.usage_limit === "number" &&
+    typeof p.usage_count === "number" &&
+    p.usage_limit > 0 &&
+    p.usage_count >= p.usage_limit
+  ) {
+    return "EXPIRED";
+  }
+  return "AVAILABLE";
+}
+
+// Unified item type cho danh sách hiển thị
+interface VoucherListItem {
+  kind: "PROMOTION" | "CUSTOMER_VOUCHER";
+  code: string;
+  title: string;
+  valueLabel: string;
+  description: string | null;
+  expiresAt: string | null;
+  status: VoucherUiStatus;
+  raw: Promotion | CustomerVoucher;
+}
+
+function buildItemFromPromotion(p: Promotion): VoucherListItem {
+  return {
+    kind: "PROMOTION",
+    code: p.code,
+    title: p.name,
+    valueLabel: formatPromotionValue(p),
+    description: p.description ?? null,
+    expiresAt: p.end_at ?? null,
+    status: resolvePromotionStatus(p),
+    raw: p,
+  };
+}
+
+function buildItemFromCustomerVoucher(
+  v: CustomerVoucher
+): VoucherListItem {
+  const title =
+    v.service_package?.name || v.note || v.code;
+  let valueLabel: string;
+  if (v.voucher_type === "FREE_SERVICE") valueLabel = "Miễn phí dịch vụ";
+  else if (typeof v.value !== "number") valueLabel = "Ưu đãi đặc biệt";
+  else if (v.voucher_type === "PERCENTAGE") {
+    const head = `Giảm ${v.value}%`;
+    valueLabel = v.max_discount_amount
+      ? `${head} · Tối đa ${formatCurrency(v.max_discount_amount)}`
+      : head;
+  } else {
+    const head = `Giảm ${formatCurrency(v.value)}`;
+    valueLabel = v.max_discount_amount
+      ? `${head} · Tối đa ${formatCurrency(v.max_discount_amount)}`
+      : head;
+  }
+  return {
+    kind: "CUSTOMER_VOUCHER",
+    code: v.code,
+    title,
+    valueLabel,
+    description: v.note ?? null,
+    expiresAt: v.expires_at ?? null,
+    status: resolveVoucherStatus(v),
+    raw: v,
+  };
+}
+
+function StatusBadge({ status }: { status: VoucherUiStatus }) {
+  const s = STATUS_STYLE[status];
+  return (
+    <View
+      className={`self-start rounded-full px-2 py-0.5 ${s.bg} border ${s.border}`}
+    >
+      <Text className={`text-[10px] font-bold ${s.text}`}>
+        {STATUS_LABEL[status]}
+      </Text>
+    </View>
+  );
+}
+
+function KindBadge({ kind }: { kind: "PROMOTION" | "CUSTOMER_VOUCHER" }) {
+  if (kind === "PROMOTION") {
+    return (
+      <View className="self-start rounded-full px-2 py-0.5 bg-primary/10 border border-primary/20">
+        <Text className="text-[10px] font-bold text-primary">KHUYẾN MÃI</Text>
+      </View>
+    );
+  }
+  return (
+    <View className="self-start rounded-full px-2 py-0.5 bg-secondary border border-primary/20">
+      <Text className="text-[10px] font-bold text-primary">VOUCHER CỦA TÔI</Text>
+    </View>
+  );
+}
+
 function VoucherCard({
-  voucher,
+  item,
   onTap,
 }: {
-  voucher: CustomerVoucher;
+  item: VoucherListItem;
   onTap: () => void;
 }) {
-  const remaining = daysUntil(voucher.expires_at);
-  const isExpired = (voucher.expires_at &&
-    new Date(voucher.expires_at).getTime() < Date.now()) ||
-    voucher.status === "EXPIRED" ||
-    voucher.status === "CANCELED";
-  const isRedeemed = voucher.status === "REDEEMED";
-  const muted = isExpired || isRedeemed;
+  const style = STATUS_STYLE[item.status];
+  const muted = style.muted;
+  const remaining = daysUntil(item.expiresAt);
+  const expiringSoon =
+    remaining !== null && remaining > 0 && remaining <= 7 && !muted;
 
   return (
     <TouchableOpacity
       activeOpacity={0.9}
       onPress={onTap}
-      className={`rounded-2xl border p-4 flex-row gap-3 ${
-        muted
-          ? "bg-muted border-border opacity-70"
-          : "bg-card border-border"
+      className={`rounded-2xl border p-4 gap-3 ${
+        muted ? "bg-muted border-border opacity-70" : "bg-card border-border"
       }`}
     >
-      <View
-        className={`w-14 h-14 rounded-2xl items-center justify-center ${
-          muted ? "bg-background" : "bg-secondary"
-        }`}
-      >
-        <TicketPercent
-          size={26}
-          color={muted ? "#94a3b8" : "#1a56db"}
-          strokeWidth={2.2}
-        />
-      </View>
-      <View className="flex-1">
-        <View className="flex-row items-center gap-2">
-          <Text
-            className={`text-sm font-bold ${
-              muted ? "text-muted-foreground" : "text-foreground"
-            }`}
-            numberOfLines={1}
-          >
-            {voucher.name || voucher.code}
-          </Text>
-        </View>
-        <Text
-          className={`text-xs mt-0.5 font-semibold ${
-            muted ? "text-muted-foreground" : "text-primary"
+      <View className="flex-row items-start gap-3">
+        <View
+          className={`w-11 h-11 rounded-xl items-center justify-center ${
+            muted ? "bg-background" : "bg-secondary"
           }`}
         >
-          {formatVoucherValue(voucher)}
-        </Text>
-        {voucher.description ? (
+          {item.kind === "PROMOTION" ? (
+            <Sparkles
+              size={20}
+              color={muted ? "#94a3b8" : "#1a56db"}
+              strokeWidth={2.2}
+            />
+          ) : (
+            <TicketPercent
+              size={20}
+              color={muted ? "#94a3b8" : "#1a56db"}
+              strokeWidth={2.2}
+            />
+          )}
+        </View>
+        <View className="flex-1 gap-1">
           <Text
-            className="text-xs text-muted-foreground mt-1 leading-relaxed"
+            className={`text-sm font-bold leading-snug ${
+              muted ? "text-muted-foreground" : "text-foreground"
+            }`}
             numberOfLines={2}
           >
-            {voucher.description}
+            {item.title}
           </Text>
-        ) : null}
-        <View className="flex-row items-center gap-2 mt-2 flex-wrap">
-          <View className="rounded-full bg-secondary px-2 py-0.5">
-            <Text className="text-[10px] font-mono font-bold text-primary">
-              {voucher.code}
-            </Text>
-          </View>
-          {voucher.expires_at && !isRedeemed ? (
-            <View className="flex-row items-center gap-1">
-              <Calendar size={11} color="#7a8599" strokeWidth={2.2} />
-              <Text className="text-[11px] text-muted-foreground">
-                HSD {formatDateTime(voucher.expires_at).split(" ")[0]}
-              </Text>
-            </View>
-          ) : null}
-          {remaining !== null && remaining > 0 && remaining <= 7 && !muted ? (
-            <View className="flex-row items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-full">
-              <Clock size={11} color="#a16207" strokeWidth={2.2} />
-              <Text className="text-[10px] font-bold text-amber-700">
-                Còn {remaining} ngày
-              </Text>
-            </View>
-          ) : null}
-          {isRedeemed ? (
-            <View className="flex-row items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full">
-              <Ticket size={11} color="#15803d" strokeWidth={2.2} />
-              <Text className="text-[10px] font-bold text-emerald-700">
-                Đã dùng
-              </Text>
-            </View>
-          ) : null}
-          {isExpired ? (
-            <View className="flex-row items-center gap-1 bg-red-50 px-2 py-0.5 rounded-full">
-              <Clock size={11} color="#b91c1c" strokeWidth={2.2} />
-              <Text className="text-[10px] font-bold text-red-700">
-                Hết hạn
-              </Text>
-            </View>
-          ) : null}
+          <Text
+            className={`text-xs font-semibold ${
+              muted ? "text-muted-foreground" : "text-primary"
+            }`}
+          >
+            {item.valueLabel}
+          </Text>
+        </View>
+        <View className="gap-1.5 items-end">
+          <KindBadge kind={item.kind} />
+          <StatusBadge status={item.status} />
         </View>
       </View>
+
+      {item.description ? (
+        <Text
+          className="text-xs text-muted-foreground leading-relaxed"
+          numberOfLines={3}
+        >
+          {item.description}
+        </Text>
+      ) : null}
+
+      <View className="flex-row items-center gap-2 flex-wrap">
+        <View className="rounded-full bg-secondary px-2 py-0.5">
+          <Text className="text-[10px] font-mono font-bold text-primary">
+            {item.code}
+          </Text>
+        </View>
+        {item.expiresAt ? (
+          <View className="flex-row items-center gap-1">
+            <Calendar size={11} color="#7a8599" strokeWidth={2.2} />
+            <Text className="text-[11px] text-muted-foreground">
+              HSD {formatDateTime(item.expiresAt).split(" ")[0]}
+            </Text>
+          </View>
+        ) : null}
+        {expiringSoon ? (
+          <View className="flex-row items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5">
+            <Clock size={11} color="#a16207" strokeWidth={2.2} />
+            <Text className="text-[10px] font-bold text-amber-700">
+              Còn {remaining} ngày
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </TouchableOpacity>
+  );
+}
+
+interface DetailRowProps {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}
+
+function DetailRow({ label, value, emphasis }: DetailRowProps) {
+  return (
+    <View className="flex-row items-start justify-between gap-3 py-2">
+      <Text className="text-xs text-muted-foreground">{label}</Text>
+      <Text
+        className={`text-xs text-right flex-1 ${
+          emphasis ? "font-bold text-primary" : "text-foreground"
+        }`}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function VoucherDetailModal({
+  item,
+  visible,
+  onClose,
+}: {
+  item: VoucherListItem | null;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  if (!item) return null;
+  const style = STATUS_STYLE[item.status];
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <Pressable
+        onPress={onClose}
+        className="flex-1 bg-black/40 justify-end"
+      >
+        <Pressable
+          onPress={() => {}}
+          className="bg-background rounded-t-3xl max-h-[88%]"
+        >
+          <View className="items-center pt-3 pb-1">
+            <View className="w-12 h-1.5 rounded-full bg-muted" />
+          </View>
+
+          <View className="flex-row items-start px-5 pt-3 pb-4 gap-3">
+            <View className="w-12 h-12 rounded-2xl bg-secondary items-center justify-center">
+              {item.kind === "PROMOTION" ? (
+                <Sparkles size={22} color="#1a56db" strokeWidth={2.2} />
+              ) : (
+                <TicketPercent size={22} color="#1a56db" strokeWidth={2.2} />
+              )}
+            </View>
+            <View className="flex-1">
+              <Text className="text-base font-bold text-foreground" numberOfLines={2}>
+                {item.title}
+              </Text>
+              <Text className="text-sm text-primary font-semibold mt-1">
+                {item.valueLabel}
+              </Text>
+              <View className="mt-1.5">
+                <KindBadge kind={item.kind} />
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={onClose}
+              className="w-9 h-9 rounded-full bg-card items-center justify-center"
+              accessibilityRole="button"
+              accessibilityLabel="Đóng"
+            >
+              <X size={18} color="#1a1a1a" strokeWidth={2.4} />
+            </TouchableOpacity>
+          </View>
+
+          <View className="mx-5 mb-3">
+            <View
+              className={`rounded-xl px-3 py-2 ${style.bg} border ${style.border}`}
+            >
+              <Text className={`text-xs font-bold ${style.text}`}>
+                Trạng thái: {STATUS_LABEL[item.status]}
+              </Text>
+            </View>
+          </View>
+
+          {item.description ? (
+            <View className="mx-5 mb-3">
+              <Text className="text-xs font-bold text-muted-foreground tracking-wide mb-1.5">
+                MÔ TẢ
+              </Text>
+              <View className="rounded-xl bg-card border border-border p-3">
+                <Text className="text-sm text-foreground leading-relaxed">
+                  {item.description}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          <View className="mx-5 mb-4">
+            <Text className="text-xs font-bold text-muted-foreground tracking-wide mb-1.5">
+              THÔNG TIN
+            </Text>
+            <View className="rounded-xl bg-card border border-border px-3 divide-y divide-border">
+              <DetailRow label="Mã" value={item.code} emphasis />
+              <DetailRow label="Giá trị" value={item.valueLabel} />
+              <DetailRow
+                label="Loại"
+                value={
+                  item.kind === "PROMOTION"
+                    ? "Khuyến mãi công khai"
+                    : "Voucher cá nhân"
+                }
+              />
+              <DetailRow
+                label="Hạn sử dụng"
+                value={
+                  item.expiresAt
+                    ? formatDateTime(item.expiresAt)
+                    : "Không giới hạn"
+                }
+              />
+              <DetailRow
+                label="Trạng thái"
+                value={STATUS_LABEL[item.status]}
+              />
+              {item.kind === "PROMOTION"
+                ? (() => {
+                    const p = item.raw as Promotion;
+                    return (
+                      <>
+                        {p.min_order_amount ? (
+                          <DetailRow
+                            label="Đơn tối thiểu"
+                            value={formatCurrency(p.min_order_amount)}
+                          />
+                        ) : null}
+                        {p.applicable_vehicle_types &&
+                        p.applicable_vehicle_types.length > 0 ? (
+                          <DetailRow
+                            label="Loại xe"
+                            value={p.applicable_vehicle_types.join(", ")}
+                          />
+                        ) : null}
+                        {p.usage_limit ? (
+                          <DetailRow
+                            label="Lượt dùng"
+                            value={`${p.usage_count ?? 0} / ${p.usage_limit}`}
+                          />
+                        ) : null}
+                      </>
+                    );
+                  })()
+                : (() => {
+                    const v = item.raw as CustomerVoucher;
+                    return (
+                      <>
+                        {v.min_order_amount ? (
+                          <DetailRow
+                            label="Đơn tối thiểu"
+                            value={formatCurrency(v.min_order_amount)}
+                          />
+                        ) : null}
+                        {v.garage?.name ? (
+                          <DetailRow
+                            label="Garage áp dụng"
+                            value={`${v.garage.name}${
+                              v.garage.garage_code
+                                ? ` · ${v.garage.garage_code}`
+                                : ""
+                            }`}
+                          />
+                        ) : null}
+                        {v.service_package?.name ? (
+                          <DetailRow
+                            label="Dịch vụ"
+                            value={v.service_package.name}
+                          />
+                        ) : null}
+                      </>
+                    );
+                  })()}
+            </View>
+          </View>
+
+          <View className="mx-5 mb-6 rounded-xl bg-secondary px-4 py-3">
+            <Text className="text-xs text-primary leading-relaxed">
+              {item.kind === "PROMOTION"
+                ? "Khuyến mãi công khai: nhập mã khi thanh toán để được giảm trực tiếp vào đơn."
+                : "Voucher cá nhân: mỗi mã chỉ dùng được một lần. Nhập mã khi thanh toán để được giảm."}{" "}
+              Mã: <Text className="font-bold">{item.code}</Text>.
+            </Text>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
 export default function VouchersScreen() {
   const router = useRouter();
   const { accessToken, isAuthenticated, isHydrated } = useApp();
-  const [vouchers, setVouchers] = useState<CustomerVoucher[]>([]);
+  const [items, setItems] = useState<VoucherListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>("ACTIVE");
+  const [detail, setDetail] = useState<VoucherListItem | null>(null);
 
-  const loadVouchers = useCallback(async () => {
+  const loadAll = useCallback(async () => {
     if (!accessToken) {
       setLoading(false);
       return;
     }
     try {
-      const response = await api.getMyVouchers(accessToken);
-      setVouchers(response.data ?? []);
+      // Song song — promotion không cần token (public), voucher cần token.
+      // Lưu ý: getPromotions public endpoint KHÔNG chấp nhận query is_active
+      // (schema strict). BE đã tự filter valid_only=true.
+      const [promoRes, voucherRes] = await Promise.allSettled([
+        api.getPromotions({ limit: 100 }),
+        api.getMyVouchers(accessToken),
+      ]);
+
+      const promotions: Promotion[] =
+        promoRes.status === "fulfilled" ? promoRes.value.data ?? [] : [];
+      const vouchers: CustomerVoucher[] =
+        voucherRes.status === "fulfilled" ? voucherRes.value.data ?? [] : [];
+
+      const merged: VoucherListItem[] = [
+        ...promotions.map(buildItemFromPromotion),
+        ...vouchers.map(buildItemFromCustomerVoucher),
+      ];
+      setItems(merged);
+
+      if (promoRes.status === "rejected") {
+        console.warn("[Vouchers] promotions load failed:", promoRes.reason);
+      }
+      if (voucherRes.status === "rejected") {
+        console.warn("[Vouchers] vouchers load failed:", voucherRes.reason);
+      }
     } catch (error) {
       const message =
         error instanceof ApiError
           ? error.message
           : "Không thể tải danh sách voucher.";
-      Alert.alert("Lỗi", message);
+      console.warn("[Vouchers] load error:", message);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -193,51 +579,48 @@ export default function VouchersScreen() {
 
   useEffect(() => {
     if (isHydrated) {
-      void loadVouchers();
+      void loadAll();
     }
-  }, [isHydrated, loadVouchers]);
+  }, [isHydrated, loadAll]);
 
   useFocusEffect(
     useCallback(() => {
       if (isHydrated && isAuthenticated) {
-        void loadVouchers();
+        void loadAll();
       }
-    }, [isHydrated, isAuthenticated, loadVouchers])
+    }, [isHydrated, isAuthenticated, loadAll])
   );
 
-  const counts = useMemo(() => {
-    let active = 0;
-    let redeemed = 0;
-    let expired = 0;
-    for (const v of vouchers) {
-      const isExpired =
-        (v.expires_at && new Date(v.expires_at).getTime() < Date.now()) ||
-        v.status === "EXPIRED" ||
-        v.status === "CANCELED";
-      if (v.status === "REDEEMED") redeemed++;
-      else if (isExpired) expired++;
-      else active++;
-    }
-    return { active, redeemed, expired, total: vouchers.length };
-  }, [vouchers]);
+  const sorted = useMemo(() => {
+    const priority: Record<VoucherUiStatus, number> = {
+      AVAILABLE: 0,
+      RESERVED: 1,
+      PENDING: 2,
+      USED: 3,
+      EXPIRED: 4,
+      REVOKED: 5,
+    };
+    return [...items].sort((a, b) => {
+      if (priority[a.status] !== priority[b.status]) {
+        return priority[a.status] - priority[b.status];
+      }
+      const aDate = a.expiresAt ? new Date(a.expiresAt).getTime() : 0;
+      const bDate = b.expiresAt ? new Date(b.expiresAt).getTime() : 0;
+      return aDate - bDate;
+    });
+  }, [items]);
 
-  const filtered = useMemo(() => {
-    return vouchers
-      .filter((v) => {
-        const isExpired =
-          (v.expires_at && new Date(v.expires_at).getTime() < Date.now()) ||
-          v.status === "EXPIRED" ||
-          v.status === "CANCELED";
-        if (activeTab === "ACTIVE") return !isExpired && v.status !== "REDEEMED";
-        if (activeTab === "REDEEMED") return v.status === "REDEEMED";
-        return isExpired;
-      })
-      .sort((a, b) => {
-        const aDate = a.expires_at ? new Date(a.expires_at).getTime() : 0;
-        const bDate = b.expires_at ? new Date(b.expires_at).getTime() : 0;
-        return aDate - bDate;
-      });
-  }, [vouchers, activeTab]);
+  const counts = useMemo(() => {
+    let promotions = 0;
+    let personal = 0;
+    let available = 0;
+    for (const it of items) {
+      if (it.kind === "PROMOTION") promotions++;
+      else personal++;
+      if (it.status === "AVAILABLE") available++;
+    }
+    return { promotions, personal, available };
+  }, [items]);
 
   if (!isHydrated) {
     return (
@@ -252,13 +635,15 @@ export default function VouchersScreen() {
       <SafeAreaView className="flex-1 bg-background">
         <ScreenState
           title="Ví voucher"
-          description="Đăng nhập để xem các voucher được Carivo tặng và sử dụng khi đặt lịch."
+          description="Đăng nhập để xem các khuyến mãi và voucher của bạn."
           actionLabel="Đăng nhập"
           onAction={() => router.push("/login")}
         />
       </SafeAreaView>
     );
   }
+
+  const total = items.length;
 
   return (
     <SafeAreaView className="flex-1 bg-background" edges={["top"]}>
@@ -273,7 +658,7 @@ export default function VouchersScreen() {
         <View className="flex-1 ml-3">
           <Text className="text-base font-bold text-foreground">Ví voucher</Text>
           <Text className="text-xs text-muted-foreground mt-0.5">
-            Quà tặng & ưu đãi đặc biệt dành cho bạn
+            Tất cả khuyến mãi & voucher của bạn
           </Text>
         </View>
       </View>
@@ -286,165 +671,87 @@ export default function VouchersScreen() {
             refreshing={refreshing}
             onRefresh={() => {
               setRefreshing(true);
-              void loadVouchers();
+              void loadAll();
             }}
           />
         }
       >
-        {/* Hero card */}
-        <View className="mx-4 mt-2 rounded-3xl overflow-hidden bg-primary p-5">
-          <View className="flex-row items-center gap-3">
-            <View className="w-12 h-12 rounded-2xl bg-white/20 items-center justify-center">
-              <Wallet size={24} color="#ffffff" strokeWidth={2.2} />
-            </View>
-            <View>
-              <Text className="text-xs text-white/80 font-semibold tracking-wide">
-                TỔNG VOUCHER KHẢ DỤNG
-              </Text>
-              <Text className="text-3xl font-bold text-white mt-0.5">
-                {counts.active}
-              </Text>
-            </View>
+        {/* Compact hero */}
+        <View className="mx-4 mt-2 rounded-2xl bg-primary px-4 py-3 flex-row items-center gap-3">
+          <View className="w-10 h-10 rounded-xl bg-white/20 items-center justify-center">
+            <Wallet size={20} color="#ffffff" strokeWidth={2.2} />
           </View>
-          <View className="flex-row gap-3 mt-4">
-            <View className="flex-1 bg-white/10 rounded-2xl px-3 py-2">
-              <Text className="text-[10px] text-white/70 font-semibold uppercase">
-                Đã dùng
-              </Text>
-              <Text className="text-base font-bold text-white">
-                {counts.redeemed}
-              </Text>
-            </View>
-            <View className="flex-1 bg-white/10 rounded-2xl px-3 py-2">
-              <Text className="text-[10px] text-white/70 font-semibold uppercase">
-                Hết hạn
-              </Text>
-              <Text className="text-base font-bold text-white">
-                {counts.expired}
-              </Text>
-            </View>
-            <View className="flex-1 bg-white/10 rounded-2xl px-3 py-2">
-              <Text className="text-[10px] text-white/70 font-semibold uppercase">
-                Tổng
-              </Text>
-              <Text className="text-base font-bold text-white">
-                {counts.total}
-              </Text>
-            </View>
+          <View className="flex-1">
+            <Text className="text-[11px] text-white/80 font-semibold tracking-wide">
+              TỔNG VOUCHER
+            </Text>
+            <Text className="text-lg font-bold text-white">
+              {total} mã trong ví
+            </Text>
+          </View>
+          <View className="items-end">
+            <Text className="text-[10px] text-white/80 font-semibold">
+              Khuyến mãi: {counts.promotions}
+            </Text>
+            <Text className="text-[10px] text-white/80 font-semibold mt-0.5">
+              Voucher cá nhân: {counts.personal}
+            </Text>
           </View>
         </View>
 
-        {/* Helper */}
+        {/* Hint */}
         <View className="mx-4 mt-4 rounded-xl bg-secondary px-4 py-3 flex-row gap-2.5 items-start">
           <Sparkles size={16} color="#1a56db" strokeWidth={2.2} />
           <Text className="flex-1 text-xs text-primary leading-5">
-            Mỗi voucher bắt đầu bằng <Text className="font-bold">CARE_</Text>.
-            Khi đặt lịch, chọn dịch vụ rồi nhập mã ở bước thanh toán để được trừ
-            trực tiếp vào đơn.
+            Bấm vào từng mã để xem chi tiết. Mã khuyến mãi áp dụng được ngay khi
+            thanh toán; voucher cá nhân chỉ dùng được một lần.
           </Text>
         </View>
 
-        {/* Tabs */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ gap: 8, paddingHorizontal: 16, paddingVertical: 16 }}
-        >
-          {(Object.keys(TAB_LABELS) as Tab[]).map((tab) => {
-            const count =
-              tab === "ACTIVE"
-                ? counts.active
-                : tab === "REDEEMED"
-                ? counts.redeemed
-                : counts.expired;
-            const active = activeTab === tab;
-            return (
-              <TouchableOpacity
-                key={tab}
-                onPress={() => setActiveTab(tab)}
-                className={`flex-row items-center gap-1.5 rounded-full px-3.5 py-2 ${
-                  active ? "bg-primary" : "bg-card border border-border"
-                }`}
-              >
-                <Text
-                  className={`text-xs font-semibold ${
-                    active ? "text-white" : "text-foreground"
-                  }`}
-                >
-                  {TAB_LABELS[tab]}
-                </Text>
-                <View
-                  className={`px-1.5 rounded-full ${
-                    active ? "bg-white/20" : "bg-muted"
-                  }`}
-                >
-                  <Text
-                    className={`text-[10px] font-bold ${
-                      active ? "text-white" : "text-muted-foreground"
-                    }`}
-                  >
-                    {count}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
         {/* List */}
-        <View className="px-4 gap-3">
+        <View className="px-4 mt-4 gap-3">
           {loading ? (
             <View className="py-12 items-center">
               <Text className="text-sm text-muted-foreground">Đang tải...</Text>
             </View>
-          ) : filtered.length === 0 ? (
+          ) : total === 0 ? (
             <View className="rounded-2xl border border-dashed border-border bg-card p-6 items-center gap-2">
               <Gift size={28} color="#94a3b8" strokeWidth={1.6} />
               <Text className="text-sm font-semibold text-foreground">
-                {activeTab === "ACTIVE"
-                  ? "Chưa có voucher khả dụng"
-                  : activeTab === "REDEEMED"
-                  ? "Chưa dùng voucher nào"
-                  : "Chưa có voucher hết hạn"}
+                Ví voucher đang trống
               </Text>
               <Text className="text-xs text-muted-foreground text-center">
-                {activeTab === "ACTIVE"
-                  ? "Hệ thống sẽ tặng voucher cho bạn sau khi hoàn tất dịch vụ. Quay lại sau nhé!"
-                  : "Voucher của bạn sẽ xuất hiện tại đây."}
+                Carivo sẽ tặng voucher cho bạn sau khi hoàn tất dịch vụ hoặc qua
+                các chương trình ưu đãi. Quay lại sau nhé!
               </Text>
-              {activeTab === "ACTIVE" ? (
-                <TouchableOpacity
-                  onPress={() => router.push("/(tabs)/booking")}
-                  className="mt-3 rounded-full bg-primary px-4 py-2"
-                >
-                  <Text className="text-white text-xs font-bold">
-                    Đặt lịch để nhận ưu đãi
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
+              <TouchableOpacity
+                onPress={() => router.push("/(tabs)/booking")}
+                className="mt-3 rounded-full bg-primary px-4 py-2"
+              >
+                <Text className="text-white text-xs font-bold">
+                  Đặt lịch để nhận ưu đãi
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : (
-            filtered.map((voucher) => (
+            sorted.map((item, idx) => (
               <VoucherCard
-                key={voucher.id}
-                voucher={voucher}
-                onTap={() => {
-                  Alert.alert(
-                    `Mã voucher: ${voucher.code}`,
-                    `${voucher.description ?? "Không có mô tả."}\n\nHạn sử dụng: ${
-                      voucher.expires_at
-                        ? formatDateTime(voucher.expires_at)
-                        : "Không giới hạn"
-                    }`
-                  );
-                }}
+                key={`${item.kind}-${item.code}-${idx}`}
+                item={item}
+                onTap={() => setDetail(item)}
               />
             ))
           )}
         </View>
       </ScrollView>
+
+      <VoucherDetailModal
+        item={detail}
+        visible={detail !== null}
+        onClose={() => setDetail(null)}
+      />
     </SafeAreaView>
   );
 }
 
-void VoucherCard;
+void Ticket;
