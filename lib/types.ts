@@ -611,6 +611,59 @@ export interface Survey {
   status: "DRAFT" | "PUBLISHED" | "CLOSED";
   questions: SurveyQuestion[];
   response_expires_at?: string | null;
+  reward_points?: number;
+}
+
+export interface FeedbackRewardInfo {
+  awarded: boolean;
+  points: number;
+  transaction_id?: string | null;
+  rule_id?: string | null;
+  awarded_at?: string | null;
+}
+
+export interface SurveyResponse {
+  id: string;
+  survey_id: string;
+  booking_id: string;
+  wash_history_id: string;
+  submitted_at: string;
+  reward?: FeedbackRewardInfo;
+}
+
+export interface FeedbackRewardRule {
+  id: string;
+  rule_code: string;
+  survey_points: number;
+  review_points: number;
+  max_points_per_booking: number;
+  review_window_days: number;
+  reminder_after_hours: number;
+  count_toward_tier: boolean;
+  is_active: boolean;
+  starts_at?: string | null;
+  ends_at?: string | null;
+}
+
+export interface FeedbackRewardStatusItem {
+  completed: boolean;
+  rewarded: boolean;
+  reward_points: number;
+  awarded_points: number;
+  rewarded_at?: string | null;
+  transaction_id?: string | null;
+  response_expires_at?: string | null;
+  response_window_open?: boolean;
+}
+
+export interface FeedbackRewardStatus {
+  booking_id: string;
+  eligible_context: boolean;
+  rule: FeedbackRewardRule;
+  survey: FeedbackRewardStatusItem;
+  review: FeedbackRewardStatusItem;
+  total_awarded_points: number;
+  available_points: number;
 }
 
 export type VoucherType =
@@ -750,6 +803,7 @@ export interface GarageReview {
   moderation_reason?: string | null;
   moderation_note?: string | null;
   garage_reply?: ReviewGarageReply | null;
+  reward?: FeedbackRewardInfo;
   deleted_at?: string | null;
   created_at: string;
   updated_at?: string | null;
@@ -771,6 +825,8 @@ export interface ReviewEligibility {
     wash_history_id: string;
     garage_id: string;
     service_package_id: string;
+    response_expires_at?: string | null;
+    reward_points?: number;
   } | null;
 }
 
@@ -1199,4 +1255,62 @@ export interface CustomerCaseDetailResponse {
   technical_assessment: CustomerCaseTechnicalAssessment | null;
   resolutions: CustomerCaseResolution[];
   refunds: CustomerCaseRefund[];
+}
+
+export type BookingViolationRiskStatus =
+  | "NORMAL"
+  | "WARNING"
+  | "DEPOSIT_REQUIRED"
+  | "BLOCKED";
+
+export type BookingViolationAppealStatus =
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED";
+
+export interface BookingViolationStatus {
+  customer_id: string | null;
+  violation_score: number;
+  risk_status: BookingViolationRiskStatus;
+  warning_required: boolean;
+  deposit_required: boolean;
+  booking_blocked: boolean;
+  booking_blocked_until: string | null;
+  booking_block_count: number;
+  last_violation_at: string | null;
+  last_event_at: string | null;
+  last_recovery_at: string | null;
+  thresholds: {
+    warning: number;
+    deposit_required: number;
+    blocked: number;
+  };
+}
+
+export interface BookingViolationHistory {
+  id: string;
+  source: "BOOKING_EVENT" | "ADJUSTMENT";
+  booking_id?: string | null;
+  booking_code?: string | null;
+  event: string;
+  score_change: number;
+  score_before: number;
+  score_after: number;
+  reason: string | null;
+  is_reversed?: boolean;
+  reversal_reason?: string | null;
+  created_at: string;
+}
+
+export interface BookingViolationAppeal {
+  id: string;
+  customer_id: string;
+  event: BookingViolationHistory | null;
+  reason: string;
+  status: BookingViolationAppealStatus;
+  admin_note: string | null;
+  reviewed_at: string | null;
+  resolution_score_change: number;
+  created_at: string;
+  updated_at: string;
 }

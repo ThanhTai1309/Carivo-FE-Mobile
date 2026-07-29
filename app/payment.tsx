@@ -10,7 +10,12 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ArrowLeft, ArrowRight, Clock3 } from "lucide-react-native";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Clock3,
+  ShieldAlert,
+} from "lucide-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import BookingInfoCard from "@/components/payment/BookingInfoCard";
 import LoadingButton from "@/components/common/LoadingButton";
@@ -23,7 +28,12 @@ import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
 import type { QueryValue } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
-import type { Promotion, Vehicle, VehicleType } from "@/lib/types";
+import type {
+  BookingViolationStatus,
+  Promotion,
+  Vehicle,
+  VehicleType,
+} from "@/lib/types";
 import { useApp } from "@/providers/AppProvider";
 
 const AVATAR =
@@ -65,6 +75,8 @@ export default function PaymentScreen() {
   );
   const [appliedPoints, setAppliedPoints] = useState(0);
   const [currentPoints, setCurrentPoints] = useState(0);
+  const [violationStatus, setViolationStatus] =
+    useState<BookingViolationStatus | null>(null);
   const [pointMultiplier, setPointMultiplier] = useState(1);
   const [loading, setLoading] = useState(true);
   const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -143,6 +155,14 @@ export default function PaymentScreen() {
               ? error.message
               : "Không thể tải điểm thưởng.";
           Alert.alert("Lỗi dữ liệu", message);
+        }
+
+        try {
+          const violationResponse =
+            await api.getBookingViolationStatus(accessToken);
+          setViolationStatus(violationResponse.data);
+        } catch {
+          setViolationStatus(null);
         }
       }
 
@@ -436,6 +456,25 @@ export default function PaymentScreen() {
       return;
     }
 
+    if (violationStatus?.booking_blocked) {
+      Alert.alert(
+        "Tạm khóa đặt lịch",
+        violationStatus.booking_blocked_until
+          ? `Bạn chưa thể tạo booking mới đến ${formatDateTime(
+              violationStatus.booking_blocked_until
+            )}.`
+          : "Tài khoản đang bị tạm khóa tạo booking mới.",
+        [
+          { text: "Đóng", style: "cancel" },
+          {
+            text: "Xem chi tiết",
+            onPress: () => router.push("/booking-reliability"),
+          },
+        ]
+      );
+      return;
+    }
+
     if (pricingBlocked) {
       if (hasUnappliedPoints) {
         Alert.alert(
@@ -557,6 +596,60 @@ export default function PaymentScreen() {
           }}
         />
 
+        {violationStatus && violationStatus.risk_status !== "NORMAL" ? (
+          <TouchableOpacity
+            onPress={() => router.push("/booking-reliability")}
+            className={`mx-4 mb-4 flex-row gap-3 rounded-xl border px-4 py-3 ${
+              violationStatus.booking_blocked
+                ? "border-red-200 bg-red-50"
+                : violationStatus.deposit_required
+                  ? "border-blue-200 bg-blue-50"
+                  : "border-amber-200 bg-amber-50"
+            }`}
+          >
+            <ShieldAlert
+              size={18}
+              color={
+                violationStatus.booking_blocked
+                  ? "#b91c1c"
+                  : violationStatus.deposit_required
+                    ? "#1d4ed8"
+                    : "#b45309"
+              }
+              strokeWidth={2.3}
+            />
+            <View className="flex-1">
+              <Text
+                className={`text-sm font-bold ${
+                  violationStatus.booking_blocked
+                    ? "text-red-800"
+                    : violationStatus.deposit_required
+                      ? "text-blue-800"
+                      : "text-amber-800"
+                }`}
+              >
+                {violationStatus.booking_blocked
+                  ? "Tài khoản đang tạm khóa đặt lịch"
+                  : violationStatus.deposit_required
+                    ? "Booking thuộc diện cảnh báo đặt cọc"
+                    : "Tài khoản đang ở mức cảnh báo"}
+              </Text>
+              <Text
+                className={`mt-1 text-xs ${
+                  violationStatus.booking_blocked
+                    ? "text-red-700"
+                    : violationStatus.deposit_required
+                      ? "text-blue-700"
+                      : "text-amber-700"
+                }`}
+              >
+                Bạn đang có {violationStatus.violation_score} điểm vi phạm. Nhấn
+                để xem chi tiết.
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
+
         <VoucherSection
           promotions={promotions}
           servicePackageId={params.servicePackageId}
@@ -636,7 +729,9 @@ export default function PaymentScreen() {
         <View className="px-4 pb-4">
           <LoadingButton
             title="Xác nhận đặt lịch"
-            disabled={loading || pricingBlocked}
+            disabled={
+              loading || pricingBlocked || Boolean(violationStatus?.booking_blocked)
+            }
             onPress={handleConfirmBooking}
             loading={submitting}
             loadingTitle="Đang tạo lịch hẹn..."

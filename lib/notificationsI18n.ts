@@ -69,6 +69,30 @@ const BOOKING: Record<string, LocalizedPair> = {
     title: "Lịch hẹn đã đổi giờ",
     message: "Lịch hẹn của bạn đã được đổi sang khung giờ mới.",
   },
+  BOOKING_VIOLATION_WARNING: {
+    title: "Cảnh báo điểm vi phạm",
+    message:
+      "Điểm vi phạm đặt lịch của bạn đã chạm mức cảnh báo. Mở để xem chi tiết.",
+  },
+  BOOKING_DEPOSIT_REQUIRED: {
+    title: "Lịch tiếp theo thuộc diện đặt cọc",
+    message:
+      "Tài khoản của bạn đã chạm mức yêu cầu đặt cọc cho booking tiếp theo.",
+  },
+  BOOKING_BLOCKED: {
+    title: "Tạm khóa quyền đặt lịch",
+    message:
+      "Tài khoản đang bị tạm khóa tạo booking mới. Mở để xem thời gian kết thúc.",
+  },
+  BOOKING_VIOLATION_APPEAL_RESOLVED: {
+    title: "Khiếu nại điểm vi phạm đã được xử lý",
+    message: "Admin đã phản hồi khiếu nại điểm vi phạm của bạn.",
+  },
+  FEEDBACK_REMINDER: {
+    title: "Phản hồi của bạn vẫn đang chờ",
+    message:
+      "Hoàn thành khảo sát và đánh giá trước khi hết hạn để nhận điểm thưởng.",
+  },
 };
 
 const WAITLIST: Record<string, LocalizedPair> = {
@@ -153,6 +177,32 @@ const PROMOTION: Record<string, LocalizedPair> = {
   },
 };
 
+const SURVEY: Record<string, LocalizedPair> = {
+  SURVEY_REQUEST: {
+    title: "Khảo sát trải nghiệm dịch vụ",
+    message: "Hoàn thành khảo sát sau dịch vụ để nhận điểm thưởng.",
+  },
+};
+
+const REVIEW: Record<string, LocalizedPair> = {
+  REVIEW_REQUEST: {
+    title: "Chia sẻ trải nghiệm của bạn",
+    message: "Đánh giá garage và dịch vụ để nhận điểm thưởng.",
+  },
+  REVIEW_REPLIED: {
+    title: "Garage đã phản hồi đánh giá",
+    message: "Garage vừa gửi phản hồi cho đánh giá của bạn.",
+  },
+  REVIEW_HIDDEN: {
+    title: "Đánh giá đã được kiểm duyệt",
+    message: "Đánh giá của bạn đã được ẩn. Mở để xem chi tiết.",
+  },
+  REVIEW_PUBLISHED: {
+    title: "Đánh giá đã được công khai",
+    message: "Đánh giá của bạn hiện đã được hiển thị công khai.",
+  },
+};
+
 const LOYALTY: Record<string, LocalizedPair> = {
   LOYALTY: {
     title: "Điểm thưởng được cập nhật",
@@ -171,6 +221,10 @@ const LOYALTY: Record<string, LocalizedPair> = {
     message:
       "Chúc mừng! Bạn vừa được nâng hạng thành viên Carivo.",
   },
+  FEEDBACK_REWARD_EARNED: {
+    title: "Đã nhận điểm thưởng phản hồi",
+    message: "Điểm thưởng đã được cộng vào tài khoản Carivo của bạn.",
+  },
 };
 
 const TABLES: Record<string, Record<string, LocalizedPair>> = {
@@ -180,14 +234,16 @@ const TABLES: Record<string, Record<string, LocalizedPair>> = {
   CASE: CUSTOMER_CASE,
   VEHICLE,
   PROMOTION,
+  SURVEY,
+  REVIEW,
   LOYALTY,
 };
 
 function pickBucket(item: NotificationItem): string | null {
   const candidates = [
-    item.related_type,
-    item.type?.split("_")[0],
     item.type,
+    item.type?.split("_")[0],
+    item.related_type,
   ].filter(Boolean) as string[];
   for (const raw of candidates) {
     const upper = String(raw).toUpperCase();
@@ -197,6 +253,10 @@ function pickBucket(item: NotificationItem): string | null {
     if (upper.includes("CASE")) return "CUSTOMER_CASE";
     if (upper.includes("VEHICLE")) return "VEHICLE";
     if (upper.includes("PROMOTION")) return "PROMOTION";
+    if (upper.includes("SURVEY")) return "SURVEY";
+    if (upper.includes("REVIEW")) return "REVIEW";
+    if (upper.includes("FEEDBACK_REWARD")) return "LOYALTY";
+    if (upper.includes("FEEDBACK")) return "BOOKING";
     if (upper.includes("LOYALTY")) return "LOYALTY";
   }
   return null;

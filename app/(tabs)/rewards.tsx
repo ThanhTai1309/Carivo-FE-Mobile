@@ -40,6 +40,8 @@ type LoyaltyTransactionType =
   | "REFUND"
   | "EXPIRE"
   | "ADJUST"
+  | "SURVEY_REWARD"
+  | "REVIEW_REWARD"
   | string;
 
 const TRANSACTION_TYPE_LABEL: Record<string, string> = {
@@ -48,6 +50,8 @@ const TRANSACTION_TYPE_LABEL: Record<string, string> = {
   REFUND: "Hoàn điểm",
   EXPIRE: "Hết hạn điểm",
   ADJUST: "Điều chỉnh điểm",
+  SURVEY_REWARD: "Thưởng khảo sát",
+  REVIEW_REWARD: "Thưởng đánh giá",
 };
 
 const TRANSACTION_DESCRIPTION_PREFIX: Record<string, string> = {
@@ -56,6 +60,8 @@ const TRANSACTION_DESCRIPTION_PREFIX: Record<string, string> = {
   REFUND: "Hoàn lại điểm do lịch đặt bị hủy",
   EXPIRE: "Điểm tích lũy đã hết hạn",
   ADJUST: "Điều chỉnh điểm thủ công bởi hệ thống",
+  SURVEY_REWARD: "Cộng điểm khi hoàn thành khảo sát sau dịch vụ",
+  REVIEW_REWARD: "Cộng điểm khi đánh giá garage và dịch vụ",
 };
 
 function translateTransactionDescription(

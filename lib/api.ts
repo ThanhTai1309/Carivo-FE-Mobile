@@ -7,6 +7,9 @@ import type {
   BookingIncident,
   BookingIncidentActiveResponse,
   BookingInspection,
+  BookingViolationAppeal,
+  BookingViolationHistory,
+  BookingViolationStatus,
   CustomerCase,
   CustomerCaseDetailResponse,
   CustomerCaseStatus,
@@ -15,6 +18,7 @@ import type {
   FavoriteGarage,
   Garage,
   GarageReview,
+  FeedbackRewardStatus,
   LoyaltySummary,
   LoyaltyTierRule,
   LoyaltyTransaction,
@@ -30,6 +34,7 @@ import type {
   ReviewSummary,
   ServicePackage,
   Survey,
+  SurveyResponse,
   SurveyQuestion,
   UserPublic,
   Vehicle,
@@ -508,6 +513,57 @@ export const api = {
     });
   },
 
+  getBookingViolationStatus(token: string) {
+    return request<ApiEnvelope<BookingViolationStatus>>(
+      "/booking-violations/me",
+      { token }
+    );
+  },
+
+  getBookingViolationHistory(
+    token: string,
+    query?: Record<string, QueryValue>
+  ) {
+    return request<ApiEnvelope<BookingViolationHistory[]>>(
+      "/booking-violations/me/history",
+      { token, query }
+    );
+  },
+
+  getBookingViolationAppeals(
+    token: string,
+    query?: Record<string, QueryValue>
+  ) {
+    return request<ApiEnvelope<BookingViolationAppeal[]>>(
+      "/booking-violations/me/appeals",
+      { token, query }
+    );
+  },
+
+  createBookingViolationAppeal(
+    token: string,
+    body: { event_id: string; reason: string }
+  ) {
+    return request<ApiEnvelope<BookingViolationAppeal>>(
+      "/booking-violations/me/appeals",
+      {
+        method: "POST",
+        token,
+        body,
+      }
+    );
+  },
+
+  getFeedbackRewardStatus(token: string, bookingId: string) {
+    return request<ApiEnvelope<FeedbackRewardStatus>>(
+      "/feedback-rewards/status",
+      {
+        token,
+        query: { booking_id: bookingId },
+      }
+    );
+  },
+
   logoutAll(token: string) {
     return request<ApiEnvelope<{ message?: string }>>("/auth/logout-all", {
       method: "POST",
@@ -780,7 +836,7 @@ export const api = {
     surveyId: string,
     body: { booking_id: string; answers: { question_id: string; value: unknown }[] }
   ) {
-    return request<ApiEnvelope<unknown>>(`/surveys/${surveyId}/responses`, {
+    return request<ApiEnvelope<SurveyResponse>>(`/surveys/${surveyId}/responses`, {
       method: "POST",
       token,
       body,

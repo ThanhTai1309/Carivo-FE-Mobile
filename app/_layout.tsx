@@ -45,6 +45,8 @@ export default function RootLayout() {
           <Stack.Screen name="history" />
           <Stack.Screen name="history/[id]" />
           <Stack.Screen name="reviews" />
+          <Stack.Screen name="booking-reliability" />
+          <Stack.Screen name="booking-violation-appeal" />
           <Stack.Screen name="review/[bookingId]" />
           <Stack.Screen name="waitlist" />
           <Stack.Screen name="waitlist/new" />

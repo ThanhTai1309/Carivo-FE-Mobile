@@ -21,11 +21,21 @@ const TYPE_ALIASES: Record<string, string> = {
   BOOKING_INCIDENT_REPORTED: "BOOKING",
   BOOKING_INCIDENT_RESOLVED: "BOOKING",
   BOOKING_CUSTOMER_DECISION_REQUIRED: "BOOKING",
+  BOOKING_VIOLATION_WARNING: "BOOKING_VIOLATION",
+  BOOKING_DEPOSIT_REQUIRED: "BOOKING_VIOLATION",
+  BOOKING_BLOCKED: "BOOKING_VIOLATION",
+  BOOKING_VIOLATION_APPEAL_RESOLVED: "BOOKING_VIOLATION",
+  BOOKING_VIOLATION: "BOOKING_VIOLATION",
+  BOOKING_VIOLATION_APPEAL: "BOOKING_VIOLATION",
   REVIEW: "REVIEW",
   REVIEW_REQUEST: "REVIEW",
   REVIEW_REPLIED: "REVIEW",
   REVIEW_HIDDEN: "REVIEW",
   REVIEW_PUBLISHED: "REVIEW",
+  SURVEY: "SURVEY",
+  SURVEY_REQUEST: "SURVEY",
+  FEEDBACK_REMINDER: "BOOKING",
+  FEEDBACK_REWARD_EARNED: "LOYALTY",
   CASE: "CUSTOMER_CASE",
   CUSTOMER_CASE: "CUSTOMER_CASE",
   VEHICLE: "VEHICLE",
@@ -40,7 +50,7 @@ function resolveBucket(
   rawType: string | undefined,
   relatedType: string | undefined
 ): string | null {
-  const candidates = [relatedType, rawType].filter(Boolean) as string[];
+  const candidates = [rawType, relatedType].filter(Boolean) as string[];
   for (const value of candidates) {
     const upper = value.toUpperCase();
     if (TYPE_ALIASES[upper]) return TYPE_ALIASES[upper];
@@ -48,6 +58,9 @@ function resolveBucket(
     if (upper.includes("CASE")) return "CUSTOMER_CASE";
     if (upper.includes("BOOKING")) return "BOOKING";
     if (upper.includes("REVIEW")) return "REVIEW";
+    if (upper.includes("SURVEY")) return "SURVEY";
+    if (upper.includes("FEEDBACK_REWARD")) return "LOYALTY";
+    if (upper.includes("FEEDBACK")) return "BOOKING";
     if (upper.includes("LOYALTY")) return "LOYALTY";
     if (upper.includes("PROMOTION")) return "PROMOTION";
     if (upper.includes("VOUCHER")) return "VOUCHER";
@@ -82,6 +95,9 @@ export function resolveDeepLink(data: PushNotificationData): DeepLinkTarget | nu
       if (!id) return null;
       return { pathname: "/booking-detail", params: { id } };
 
+    case "BOOKING_VIOLATION":
+      return { pathname: "/booking-reliability" };
+
     case "REVIEW": {
       const metadata =
         data.metadata && typeof data.metadata === "object"
@@ -101,6 +117,31 @@ export function resolveDeepLink(data: PushNotificationData): DeepLinkTarget | nu
             params: { bookingId },
           }
         : { pathname: "/reviews" };
+    }
+
+    case "SURVEY": {
+      const metadata =
+        data.metadata && typeof data.metadata === "object"
+          ? (data.metadata as Record<string, unknown>)
+          : null;
+      const bookingId =
+        typeof metadata?.booking_id === "string"
+          ? metadata.booking_id
+          : typeof data.booking_id === "string"
+            ? data.booking_id
+            : undefined;
+      const surveyId =
+        typeof metadata?.survey_id === "string"
+          ? metadata.survey_id
+          : id;
+      if (!bookingId) return null;
+      return {
+        pathname: "/survey-response",
+        params: {
+          bookingId,
+          ...(surveyId ? { surveyId } : {}),
+        },
+      };
     }
 
     case "LOYALTY":

@@ -7,6 +7,7 @@ const ELIGIBILITY_MESSAGES: Record<string, string> = {
   REVIEW_BOOKING_NOT_COMPLETED: "Bạn chỉ có thể đánh giá sau khi booking hoàn thành.",
   REVIEW_BOOKING_NOT_SETTLED: "Booking cần được thanh toán hoặc miễn thanh toán trước khi đánh giá.",
   REVIEW_WASH_HISTORY_REQUIRED: "Chưa có lịch sử dịch vụ hợp lệ để đánh giá booking này.",
+  REVIEW_WINDOW_EXPIRED: "Thời hạn đánh giá booking này đã kết thúc.",
 };
 
 const API_ERROR_MESSAGES: Record<string, string> = {
@@ -16,6 +17,7 @@ const API_ERROR_MESSAGES: Record<string, string> = {
   REVIEW_BOOKING_NOT_COMPLETED: ELIGIBILITY_MESSAGES.REVIEW_BOOKING_NOT_COMPLETED,
   REVIEW_BOOKING_NOT_SETTLED: ELIGIBILITY_MESSAGES.REVIEW_BOOKING_NOT_SETTLED,
   REVIEW_WASH_HISTORY_REQUIRED: ELIGIBILITY_MESSAGES.REVIEW_WASH_HISTORY_REQUIRED,
+  REVIEW_WINDOW_EXPIRED: ELIGIBILITY_MESSAGES.REVIEW_WINDOW_EXPIRED,
   REVIEW_UPLOAD_IMAGE_REQUIRED: "Đánh giá chỉ chấp nhận tệp hình ảnh.",
   INVALID_REVIEW_UPLOADS: "Một hoặc nhiều ảnh không hợp lệ hoặc không thuộc tài khoản của bạn.",
   DUPLICATE_REVIEW_UPLOADS: "Danh sách ảnh đánh giá đang bị trùng.",

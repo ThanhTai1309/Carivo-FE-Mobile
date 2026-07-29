@@ -16,6 +16,7 @@ import * as ImagePicker from "expo-image-picker";
 import {
   ArrowLeft,
   Camera,
+  Coins,
   EyeOff,
   ImagePlus,
   Save,
@@ -180,7 +181,9 @@ export default function BookingReviewScreen() {
         "Đã lưu đánh giá",
         review
           ? "Đánh giá của bạn đã được cập nhật."
-          : "Cảm ơn bạn đã chia sẻ trải nghiệm."
+          : (response.data.reward?.points ?? 0) > 0
+            ? `Cảm ơn bạn đã chia sẻ trải nghiệm. ${response.data.reward?.points} điểm thưởng đã được cộng vào tài khoản.`
+            : "Cảm ơn bạn đã chia sẻ trải nghiệm."
       );
     } catch (error) {
       if (newUploadIds.length > 0) {
@@ -299,6 +302,31 @@ export default function BookingReviewScreen() {
           </View>
         ) : (
           <View className="gap-4">
+            {!review && (eligibility?.context?.reward_points ?? 0) > 0 ? (
+              <View className="flex-row items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <View className="h-10 w-10 items-center justify-center rounded-full bg-amber-100">
+                  <Coins size={20} color="#b45309" strokeWidth={2.2} />
+                </View>
+                <View className="flex-1">
+                  <Text className="text-sm font-bold text-amber-900">
+                    Nhận {eligibility?.context?.reward_points} điểm thưởng
+                  </Text>
+                  <Text className="mt-1 text-xs leading-5 text-amber-800">
+                    Điểm được tặng khi bạn chấm cả garage và dịch vụ, không phụ thuộc số sao.
+                  </Text>
+                </View>
+              </View>
+            ) : null}
+
+            {review?.reward?.awarded ? (
+              <View className="flex-row items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <Coins size={18} color="#047857" strokeWidth={2.2} />
+                <Text className="flex-1 text-sm font-semibold text-emerald-800">
+                  Đã nhận {review.reward.points} điểm cho đánh giá này
+                </Text>
+              </View>
+            ) : null}
+
             {review?.moderation_status === "HIDDEN" ? (
               <ReviewCard review={review} showSubject showModeration />
             ) : null}

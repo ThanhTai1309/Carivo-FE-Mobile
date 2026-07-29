@@ -15,6 +15,7 @@ import {
   Check,
   CircleSlash,
   ClipboardList,
+  Coins,
   Send,
   Star,
   ThumbsUp,
@@ -201,10 +202,17 @@ export default function SurveyResponseScreen() {
           value: answers[q.id] ?? null,
         })),
       };
-      await api.submitSurveyResponse(accessToken, activeSurvey.id, payload);
+      const response = await api.submitSurveyResponse(
+        accessToken,
+        activeSurvey.id,
+        payload
+      );
+      const awardedPoints = response.data.reward?.points ?? 0;
       Alert.alert(
         "Cảm ơn bạn!",
-        "Phản hồi đã được ghi nhận. Carivo sẽ dùng đánh giá của bạn để cải thiện dịch vụ.",
+        awardedPoints > 0
+          ? `Phản hồi đã được ghi nhận và ${awardedPoints} điểm thưởng đã được cộng vào tài khoản.`
+          : "Phản hồi đã được ghi nhận. Carivo sẽ dùng đánh giá của bạn để cải thiện dịch vụ.",
         [{ text: "OK", onPress: () => router.back() }]
       );
     } catch (error) {
@@ -434,6 +442,14 @@ export default function SurveyResponseScreen() {
                     {activeSurvey.description}
                   </Text>
                 ) : null}
+                {(activeSurvey.reward_points ?? 0) > 0 ? (
+                  <View className="mt-3 self-start flex-row items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5">
+                    <Coins size={14} color="#ffffff" strokeWidth={2.2} />
+                    <Text className="text-xs font-bold text-white">
+                      Hoàn thành nhận {activeSurvey.reward_points} điểm
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               {surveys.length > 1 ? (
@@ -474,7 +490,7 @@ export default function SurveyResponseScreen() {
                         isValid ? "text-white" : "text-muted-foreground"
                       }`}
                     >
-                      Gửi đánh giá
+                      Gửi khảo sát
                     </Text>
                     <Send
                       size={18}

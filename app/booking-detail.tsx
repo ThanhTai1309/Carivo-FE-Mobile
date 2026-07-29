@@ -57,6 +57,7 @@ import type {
   BookingHandoverState,
   BookingIncident,
   BookingInspection,
+  FeedbackRewardStatus,
   PaymentTransaction,
   WashHistory,
 } from "@/lib/types";
@@ -335,6 +336,8 @@ export default function BookingDetailScreen() {
   );
   const [openingCheckout, setOpeningCheckout] = useState(false);
   const [cancellingPayment, setCancellingPayment] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] =
+    useState<FeedbackRewardStatus | null>(null);
 
   // Auto-poll booking when waiting for staff confirmation or PayOS.
   const shouldPoll =
@@ -395,7 +398,12 @@ export default function BookingDetailScreen() {
         const fetchedBooking = bookingResponse.data;
         setBooking(fetchedBooking);
 
-        const [inspectionResponse, washListResponse, payosResponse] =
+        const [
+          inspectionResponse,
+          washListResponse,
+          payosResponse,
+          feedbackResponse,
+        ] =
           await Promise.all([
             (api.getBookingInspections(accessToken, bookingId) as Promise<
               Awaited<ReturnType<typeof api.getBookingInspections>>
@@ -418,6 +426,11 @@ export default function BookingDetailScreen() {
                 >
             ),
             api.getPayosPayment(accessToken, bookingId).catch(() => null),
+            fetchedBooking?.status === "COMPLETED"
+              ? api
+                  .getFeedbackRewardStatus(accessToken, bookingId)
+                  .catch(() => null)
+              : Promise.resolve(null),
           ]);
 
         setInspections(inspectionResponse.data ?? []);
@@ -426,6 +439,7 @@ export default function BookingDetailScreen() {
 
         const payosData = payosResponse?.data?.payment ?? null;
         setPayosPayment(payosData);
+        setFeedbackStatus(feedbackResponse?.data ?? null);
 
         // Handover chỉ có khi booking đã COMPLETED — gọi riêng để 404 không chặn flow
         if (fetchedBooking?.status === "COMPLETED") {
@@ -699,11 +713,22 @@ export default function BookingDetailScreen() {
   const canCancel =
     booking && (booking.status === "PENDING" || booking.status === "CONFIRMED");
   const canRebook = booking && booking.status === "COMPLETED";
-  const canSurvey = booking && booking.status === "COMPLETED";
+  const canSurvey =
+    booking &&
+    booking.status === "COMPLETED" &&
+    (feedbackStatus
+      ? feedbackStatus.eligible_context && !feedbackStatus.survey.completed
+        && feedbackStatus.survey.response_window_open !== false
+      : true);
   const canReview =
     booking &&
     booking.status === "COMPLETED" &&
-    (booking.payment_status === "PAID" || booking.payment_status === "WAIVED");
+    (booking.payment_status === "PAID" || booking.payment_status === "WAIVED") &&
+    (feedbackStatus
+      ? feedbackStatus.eligible_context &&
+        !feedbackStatus.review.completed &&
+        feedbackStatus.review.response_window_open !== false
+      : true);
   const isPayosPending =
     payosPayment &&
     (payosPayment.status === "PENDING" ||
@@ -1372,6 +1397,45 @@ export default function BookingDetailScreen() {
               className="shadow-lg shadow-primary/30"
             />
           ) : null}
+          {feedbackStatus?.eligible_context ? (
+            <View className="rounded-2xl bg-amber-50 border border-amber-200 px-4 py-3.5 gap-2.5">
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center gap-2">
+                  <Coins size={17} color="#b45309" strokeWidth={2.2} />
+                  <Text className="text-amber-900 font-semibold text-sm">
+                    Phản hồi sau dịch vụ
+                  </Text>
+                </View>
+                <Text className="text-amber-800 font-bold text-sm">
+                  Đã nhận {feedbackStatus.total_awarded_points} điểm
+                </Text>
+              </View>
+              <Text className="text-amber-800 text-xs">
+                Khảo sát:{" "}
+                {feedbackStatus.survey.completed
+                  ? `đã hoàn thành${
+                      feedbackStatus.survey.awarded_points
+                        ? `, +${feedbackStatus.survey.awarded_points} điểm`
+                        : ""
+                    }`
+                  : feedbackStatus.survey.response_window_open === false
+                    ? "đã hết hạn hoặc chưa có khảo sát đang mở"
+                    : `chưa hoàn thành, +${feedbackStatus.survey.reward_points} điểm`}
+              </Text>
+              <Text className="text-amber-800 text-xs">
+                Đánh giá:{" "}
+                {feedbackStatus.review.completed
+                  ? `đã hoàn thành${
+                      feedbackStatus.review.awarded_points
+                        ? `, +${feedbackStatus.review.awarded_points} điểm`
+                        : ""
+                    }`
+                  : feedbackStatus.review.response_window_open === false
+                    ? "đã hết hạn"
+                    : `chưa hoàn thành, +${feedbackStatus.review.reward_points} điểm`}
+              </Text>
+            </View>
+          ) : null}
           {canReview ? (
             <TouchableOpacity
               onPress={handleOpenReview}
@@ -1386,6 +1450,9 @@ export default function BookingDetailScreen() {
               />
               <Text className="text-white font-semibold text-sm">
                 Đánh giá garage và dịch vụ
+                {feedbackStatus?.review.reward_points
+                  ? ` · +${feedbackStatus.review.reward_points} điểm`
+                  : ""}
               </Text>
               <ExternalLink size={14} color="#ffffff" strokeWidth={2.4} />
             </TouchableOpacity>
@@ -1399,6 +1466,9 @@ export default function BookingDetailScreen() {
               <ClipboardList size={16} color="#1a5fd4" strokeWidth={2.2} />
               <Text className="text-primary font-semibold text-sm">
                 Khảo sát trải nghiệm
+                {feedbackStatus?.survey.reward_points
+                  ? ` · +${feedbackStatus.survey.reward_points} điểm`
+                  : ""}
               </Text>
               <ExternalLink size={14} color="#1a5fd4" strokeWidth={2.4} />
             </TouchableOpacity>

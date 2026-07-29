@@ -28,6 +28,7 @@ import {
   Pencil,
   Phone,
   Settings as SettingsIcon,
+  ShieldAlert,
 } from "lucide-react-native";
 import ScreenState from "@/components/common/ScreenState";
 import { api, ApiError } from "@/lib/api";
@@ -256,6 +257,11 @@ export default function ProfileScreen() {
         icon: MessageSquareText,
         label: "Đánh giá của tôi",
         onPress: () => router.push("/reviews"),
+      },
+      {
+        icon: ShieldAlert,
+        label: "Độ tin cậy đặt lịch",
+        onPress: () => router.push("/booking-reliability"),
       },
       {
         icon: Hourglass,
