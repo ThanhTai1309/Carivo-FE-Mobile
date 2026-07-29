@@ -179,10 +179,12 @@ export interface Promotion {
   per_customer_limit?: number | null;
 }
 
+export type LoyaltyTier = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM";
+
 export interface LoyaltyAccount {
   id: string;
   customer_id?: string;
-  current_tier: "BRONZE" | "SILVER" | "GOLD" | "PLATINUM" | string;
+  current_tier: LoyaltyTier | string;
   total_points: number;
   available_points: number;
   redeemed_points: number;
@@ -509,9 +511,16 @@ export interface WashHistory {
 }
 
 export interface WashHistoryClaimResult {
-  matched_count?: number;
-  claimed_count?: number;
-  [key: string]: unknown;
+  claimed_bookings: number;
+  claimed_wash_histories: number;
+  linked_promotion_usages: number;
+  loyalty_bookings_processed: number;
+  awarded_points: number;
+  total_spent_added: number;
+  total_visits_added: number;
+  current_tier: LoyaltyTier | null;
+  retry_required?: boolean;
+  error_code?: string;
 }
 
 export interface Waitlist {

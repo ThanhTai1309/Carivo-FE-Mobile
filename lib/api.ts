@@ -170,7 +170,12 @@ export const api = {
     full_name?: string;
     phone_verification_token: string;
   }) {
-    return request<ApiEnvelope<{ user: UserPublic }>>("/auth/register", {
+    return request<
+      ApiEnvelope<{
+        user: UserPublic;
+        walk_in_history_claim?: WashHistoryClaimResult;
+      }>
+    >("/auth/register", {
       method: "POST",
       body,
     });

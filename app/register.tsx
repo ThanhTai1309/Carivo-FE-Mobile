@@ -82,14 +82,34 @@ export default function RegisterScreen() {
     }
 
     try {
-      await registerCustomer({
+      const claim = await registerCustomer({
         phone,
         password,
         email: email || undefined,
         full_name: fullName || undefined,
         phone_verification_token: verificationToken,
       });
-      router.replace("/(tabs)");
+      const continueToApp = () => router.replace("/(tabs)");
+
+      if (claim?.claimed_bookings) {
+        Alert.alert(
+          "Đã đồng bộ lịch sử",
+          `Hệ thống đã liên kết ${claim.claimed_wash_histories} lượt sử dụng và cộng ${claim.awarded_points.toLocaleString("vi-VN")} điểm thưởng vào tài khoản.`,
+          [{ text: "Tiếp tục", onPress: continueToApp }]
+        );
+        return;
+      }
+
+      if (claim?.retry_required) {
+        Alert.alert(
+          "Đăng ký thành công",
+          "Tài khoản đã được tạo nhưng lịch sử khách vãng lai chưa thể đồng bộ. Hệ thống sẽ thử lại trong lần đăng nhập tiếp theo.",
+          [{ text: "Tiếp tục", onPress: continueToApp }]
+        );
+        return;
+      }
+
+      continueToApp();
     } catch (error) {
       const message =
         error instanceof ApiError ? error.message : "Không thể đăng ký tài khoản.";

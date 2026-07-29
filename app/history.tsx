@@ -79,11 +79,10 @@ function HistoryScreen() {
     setClaiming(true);
     try {
       const result = await api.claimWashHistory(accessToken);
-      const claimed =
-        (result.data as { claimed_count?: number })?.claimed_count ?? 0;
+      const claimed = result.data.claimed_bookings;
       setClaimMessage(
         claimed > 0
-          ? `Đã đồng bộ ${claimed} lần rửa vào tài khoản của bạn.`
+          ? `Đã đồng bộ ${result.data.claimed_wash_histories} lượt sử dụng và cộng ${result.data.awarded_points.toLocaleString("vi-VN")} điểm thưởng.`
           : "Không có lịch sử walk-in nào cần đồng bộ."
       );
       await loadHistories(true);

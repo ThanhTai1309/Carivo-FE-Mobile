@@ -16,6 +16,7 @@ import type {
   PhoneVerificationChallenge,
   PhoneVerificationToken,
   UserPublic,
+  WashHistoryClaimResult,
 } from "@/lib/types";
 
 interface RegisterPayload {
@@ -47,7 +48,10 @@ interface AppContextValue {
   authBusy: boolean;
   isAuthenticated: boolean;
   isHydrated: boolean;
-  login: (phone: string, password: string) => Promise<void>;
+  login: (
+    phone: string,
+    password: string
+  ) => Promise<WashHistoryClaimResult | null>;
   logout: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   requestPhoneVerification: (
@@ -58,7 +62,9 @@ interface AppContextValue {
     challengeId: string,
     otp: string
   ) => Promise<PhoneVerificationToken>;
-  registerCustomer: (payload: RegisterPayload) => Promise<void>;
+  registerCustomer: (
+    payload: RegisterPayload
+  ) => Promise<WashHistoryClaimResult | null>;
   forgotPassword: (phone: string) => Promise<void>;
   resetPassword: (
     phone: string,
@@ -183,8 +189,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       } catch {
         // profile fetch failure should not block login
       }
+      let walkInHistoryClaim: WashHistoryClaimResult | null = null;
+      if (user.role === "CUSTOMER") {
+        try {
+          const claimResponse = await api.claimWashHistory(token);
+          walkInHistoryClaim = claimResponse.data;
+        } catch {
+          walkInHistoryClaim = null;
+        }
+      }
       // Register for push notifications after successful login
       void getOrCreateExpoPushToken();
+      return walkInHistoryClaim;
     } finally {
       setAuthBusy(false);
     }
@@ -226,8 +242,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const registerCustomer = async (payload: RegisterPayload) => {
     setAuthBusy(true);
     try {
-      await api.register(payload);
-      await login(payload.phone, payload.password);
+      const registration = await api.register(payload);
+      const loginClaim = await login(payload.phone, payload.password);
+      const registrationClaim =
+        registration.data.walk_in_history_claim ?? null;
+
+      if (registrationClaim?.retry_required) {
+        return loginClaim ?? registrationClaim;
+      }
+
+      return registrationClaim;
     } finally {
       setAuthBusy(false);
     }
