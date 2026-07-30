@@ -171,6 +171,7 @@ export interface Promotion {
   min_order_amount?: number;
   applicable_vehicle_types?: VehicleType[];
   applicable_service_package_ids?: string[];
+  applicable_tiers?: LoyaltyTier[];
   start_at?: string | null;
   end_at?: string | null;
   is_active?: boolean;
@@ -186,6 +187,8 @@ export interface LoyaltyAccount {
   customer_id?: string;
   current_tier: LoyaltyTier | string;
   total_points: number;
+  qualifying_points: number;
+  bonus_points: number;
   available_points: number;
   redeemed_points: number;
   expired_points: number;

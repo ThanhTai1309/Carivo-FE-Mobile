@@ -60,14 +60,14 @@ const DECISION_CARDS: Array<{
   {
     id: "RESCHEDULE_NEAREST",
     title: "Đặt lại khung giờ gần nhất",
-    description: "Garage đề xuất khung giờ trống gần nhất cho bạn chọn.",
+    description: "Hệ thống tự chọn khung giờ hợp lệ gần nhất.",
     icon: Calendar,
     tone: "warning",
   },
   {
     id: "RESCHEDULE_CUSTOM",
     title: "Đặt lại giờ khác",
-    description: "Bạn tự chọn khung giờ mới phù hợp với lịch trình của mình.",
+    description: "Bạn chọn một khung giờ hợp lệ trong danh sách gợi ý.",
     icon: RefreshCcw,
     tone: "warning",
     needsNewStartTime: true,
@@ -94,10 +94,9 @@ export default function IncidentDecisionScreen() {
   const [selectedDecision, setSelectedDecision] =
     useState<BookingIncidentDecision | null>(null);
   const [selectedSlotIso, setSelectedSlotIso] = useState<string | null>(null);
-  const [customStartTime, setCustomStartTime] = useState("");
   const [continuationPolicy, setContinuationPolicy] = useState<
-    "RESUME_REMAINING" | "RESTART_CURRENT_ITEM" | ""
-  >("");
+    "RESUME_REMAINING" | "RESTART_CURRENT_ITEM"
+  >("RESUME_REMAINING");
   const [customerNote, setCustomerNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -146,27 +145,6 @@ export default function IncidentDecisionScreen() {
 
     let newStartTime: string | undefined;
     if (selectedDecision === "RESCHEDULE_CUSTOM") {
-      if (!customStartTime.trim()) {
-        Alert.alert(
-          "Thiếu thời gian",
-          "Vui lòng nhập khung giờ mới bạn mong muốn."
-        );
-        return;
-      }
-      try {
-        const isoCandidate = new Date(customStartTime.trim());
-        if (Number.isNaN(isoCandidate.getTime())) {
-          throw new Error();
-        }
-        newStartTime = isoCandidate.toISOString();
-      } catch {
-        Alert.alert(
-          "Sai định dạng",
-          "Vui lòng nhập thời gian theo định dạng ISO (ví dụ 2026-07-25T09:00:00.000Z)."
-        );
-        return;
-      }
-    } else if (selectedDecision === "RESCHEDULE_NEAREST") {
       if (!selectedSlotIso) {
         Alert.alert(
           "Thiếu khung giờ",
@@ -190,7 +168,10 @@ export default function IncidentDecisionScreen() {
             | "RESCHEDULE_CUSTOM"
             | "CANCEL_BY_GARAGE",
           new_start_time: newStartTime,
-          continuation_policy: continuationPolicy || undefined,
+          continuation_policy:
+            selectedDecision === "CANCEL_BY_GARAGE"
+              ? undefined
+              : continuationPolicy,
           customer_note: customerNote.trim() || undefined,
         }
       );
@@ -412,11 +393,10 @@ export default function IncidentDecisionScreen() {
           )}
         </View>
 
-        {/* Slot picker cho RESCHEDULE_NEAREST */}
-        {selectedDecision === "RESCHEDULE_NEAREST" && options ? (
+        {selectedDecision === "RESCHEDULE_CUSTOM" && options ? (
           <View className="px-4 mb-4">
             <Text className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-              Khung giờ gợi ý
+              Chọn khung giờ mới
             </Text>
             <View className="rounded-2xl border border-border bg-card p-4 gap-3">
               {(options.days ?? []).map((day) => (
@@ -485,32 +465,29 @@ export default function IncidentDecisionScreen() {
           </View>
         ) : null}
 
-        {/* Custom datetime cho RESCHEDULE_CUSTOM */}
-        {selectedDecision === "RESCHEDULE_CUSTOM" ? (
+        {selectedDecision === "RESCHEDULE_NEAREST" ? (
           <View className="px-4 mb-4">
             <Text className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
-              Khung giờ mong muốn
+              Khung giờ gần nhất
             </Text>
-            <View className="rounded-2xl border border-border bg-card p-4 gap-3">
-              <TextInput
-                value={customStartTime}
-                onChangeText={setCustomStartTime}
-                placeholder="2026-07-25T09:00:00.000Z"
-                placeholderTextColor="#94a3b8"
-                className="bg-background border border-border rounded-xl px-3 py-2.5 text-sm text-foreground"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <Text className="text-xs text-muted-foreground leading-5">
-                Nhập thời gian theo định dạng ISO 8601. Garage sẽ xác nhận lại
-                khung giờ này với bạn.
-              </Text>
+            <View className="rounded-2xl border border-border bg-card p-4 flex-row items-center gap-3">
+              <Calendar size={18} color="#1a5fd4" strokeWidth={2.2} />
+              <View className="flex-1">
+                <Text className="text-sm font-semibold text-foreground">
+                  {options?.suggested_slots?.[0]?.start_time
+                    ? formatDateTime(options.suggested_slots[0].start_time)
+                    : "Chưa có khung giờ phù hợp"}
+                </Text>
+                <Text className="text-xs text-muted-foreground mt-1">
+                  Backend sẽ kiểm tra lại và chọn slot khả dụng đầu tiên khi bạn
+                  xác nhận.
+                </Text>
+              </View>
             </View>
           </View>
         ) : null}
 
-        {/* Continuation policy cho REASSIGN_AND_CONTINUE */}
-        {selectedDecision === "REASSIGN_AND_CONTINUE" ? (
+        {selectedDecision && selectedDecision !== "CANCEL_BY_GARAGE" ? (
           <View className="px-4 mb-4">
             <Text className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 px-1">
               Chính sách tiếp tục
@@ -524,8 +501,8 @@ export default function IncidentDecisionScreen() {
               />
               <PolicyOption
                 selected={continuationPolicy === "RESTART_CURRENT_ITEM"}
-                title="Rửa lại từ đầu"
-                description="Bắt đầu lại dịch vụ đang thực hiện từ đầu."
+                title="Làm lại hạng mục hiện tại"
+                description="Đặt lại toàn bộ thời lượng của hạng mục đang thực hiện."
                 onPress={() => setContinuationPolicy("RESTART_CURRENT_ITEM")}
               />
             </View>

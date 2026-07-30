@@ -517,6 +517,7 @@ export default function ProfileScreen() {
                   style: "destructive",
                   onPress: async () => {
                     await logout();
+                    router.dismissAll();
                     router.replace("/login");
                   },
                 },

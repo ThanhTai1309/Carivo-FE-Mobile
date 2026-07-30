@@ -147,6 +147,16 @@ function isActivePromotion(promo: Promotion): boolean {
   return true;
 }
 
+function isPromotionAvailableForTier(
+  promo: Promotion,
+  currentTier: TierName
+): boolean {
+  if (!promo.applicable_tiers?.length) return true;
+  return promo.applicable_tiers.some(
+    (tier) => normalizeTier(tier) === currentTier
+  );
+}
+
 function formatDiscount(promo: Promotion): string {
   if (promo.discount_type === "PERCENTAGE") {
     return `Giảm ${promo.discount_value}%`;
@@ -200,31 +210,67 @@ interface TierProgressCardProps {
   account: LoyaltyAccount | null;
   currentTier: TierName;
   nextRule: LoyaltyTierRule | null;
-  tierRules: LoyaltyTierRule[];
 }
 
 function TierProgressCard({
   account,
   currentTier,
   nextRule,
-  tierRules,
 }: TierProgressCardProps) {
   const presentation = TIER_PRESENTATION[currentTier];
   const Icon = presentation.icon;
   const totalPoints = account?.total_points ?? 0;
+  const qualifyingPoints = account?.qualifying_points ?? totalPoints;
+  const bonusPoints = account?.bonus_points ?? 0;
   const availablePoints = account?.available_points ?? 0;
   const redeemedPoints = account?.redeemed_points ?? 0;
-  const targetPoints = nextRule?.min_total_points ?? null;
-
-  let progress = 100;
-  let remaining: number | null = null;
-
-  if (targetPoints !== null && targetPoints > 0) {
-    const previousMin = previousTierMinForTier(tierRules, currentTier, 0);
-    const span = Math.max(1, targetPoints - previousMin);
-    progress = clampPercent(((totalPoints - previousMin) / span) * 100);
-    remaining = Math.max(0, targetPoints - totalPoints);
-  }
+  const totalSpent = account?.total_spent ?? 0;
+  const totalVisits = account?.total_visits ?? 0;
+  const targetSpent = nextRule?.min_total_spent ?? 0;
+  const targetVisits = nextRule?.min_total_visits ?? 0;
+  const targetPoints = nextRule?.min_total_points ?? 0;
+  const remainingSpent = Math.max(0, targetSpent - totalSpent);
+  const remainingVisits = Math.max(0, targetVisits - totalVisits);
+  const remainingPoints = Math.max(0, targetPoints - qualifyingPoints);
+  const criteria = [
+    {
+      label: "Chi tiêu",
+      value: formatCurrency(totalSpent),
+      target: formatCurrency(targetSpent),
+      progress:
+        targetSpent > 0 ? clampPercent((totalSpent / targetSpent) * 100) : 100,
+    },
+    {
+      label: "Booking hoàn thành",
+      value: totalVisits.toLocaleString("vi-VN"),
+      target: targetVisits.toLocaleString("vi-VN"),
+      progress:
+        targetVisits > 0 ? clampPercent((totalVisits / targetVisits) * 100) : 100,
+    },
+    {
+      label: "Điểm xét hạng",
+      value: qualifyingPoints.toLocaleString("vi-VN"),
+      target: targetPoints.toLocaleString("vi-VN"),
+      progress:
+        targetPoints > 0
+          ? clampPercent((qualifyingPoints / targetPoints) * 100)
+          : 100,
+    },
+  ];
+  const progress = nextRule
+    ? Math.min(...criteria.map((criterion) => criterion.progress))
+    : 100;
+  const isEligible =
+    remainingSpent === 0 && remainingVisits === 0 && remainingPoints === 0;
+  const remainingParts = [
+    remainingSpent > 0 ? `${formatCurrency(remainingSpent)} chi tiêu` : null,
+    remainingVisits > 0
+      ? `${remainingVisits.toLocaleString("vi-VN")} booking`
+      : null,
+    remainingPoints > 0
+      ? `${remainingPoints.toLocaleString("vi-VN")} điểm xét hạng`
+      : null,
+  ].filter((part): part is string => Boolean(part));
 
   return (
     <View
@@ -260,6 +306,12 @@ function TierProgressCard({
           <Text className="text-white/80 text-xs mt-1">
             Tổng tích lũy: {totalPoints.toLocaleString("vi-VN")} điểm
           </Text>
+          <Text className="text-white/80 text-xs mt-1">
+            Điểm xét hạng: {qualifyingPoints.toLocaleString("vi-VN")}
+            {bonusPoints > 0
+              ? ` · Điểm thưởng thêm: ${bonusPoints.toLocaleString("vi-VN")}`
+              : ""}
+          </Text>
         </View>
 
         <View className="mt-5">
@@ -283,11 +335,31 @@ function TierProgressCard({
                   style={{ width: `${progress}%` }}
                 />
               </View>
+              <View className="mt-3 gap-2">
+                {criteria.map((criterion) => (
+                  <View key={criterion.label}>
+                    <View className="flex-row items-center justify-between">
+                      <Text className="text-[11px] text-white/80">
+                        {criterion.label}
+                      </Text>
+                      <Text className="text-[11px] text-white font-semibold">
+                        {criterion.value} / {criterion.target}
+                      </Text>
+                    </View>
+                    <View className="h-1.5 rounded-full bg-white/20 overflow-hidden mt-1">
+                      <View
+                        className="h-full rounded-full bg-white"
+                        style={{ width: `${criterion.progress}%` }}
+                      />
+                    </View>
+                  </View>
+                ))}
+              </View>
               <Text className="text-xs text-white/80 mt-2">
-                {remaining && remaining > 0 ? (
-                  <>Còn {remaining.toLocaleString("vi-VN")} điểm để thăng hạng</>
-                ) : (
+                {isEligible ? (
                   <>Bạn đã đủ điều kiện thăng hạng.</>
+                ) : (
+                  <>Cần thêm {remainingParts.join(", ")} để thăng hạng.</>
                 )}
               </Text>
             </>
@@ -308,21 +380,6 @@ function TierProgressCard({
       </View>
     </View>
   );
-}
-
-function previousTierMinForTier(
-  rules: LoyaltyTierRule[],
-  currentTier: TierName,
-  fallbackDefault = 0
-): number {
-  if (rules.length === 0) return fallbackDefault;
-  const sorted = [...rules].sort(
-    (a, b) => (a.min_total_points ?? 0) - (b.min_total_points ?? 0)
-  );
-  const currentIndex = TIER_ORDER.indexOf(currentTier);
-  if (currentIndex <= 0) return 0;
-  const previous = sorted[currentIndex - 1];
-  return previous?.min_total_points ?? fallbackDefault;
 }
 
 interface PromotionCardProps {
@@ -563,8 +620,15 @@ export default function RewardsScreen() {
   );
 
   const activePromotions = useMemo(
-    () => promotions.filter(isActivePromotion).slice(0, 8),
-    [promotions]
+    () =>
+      promotions
+        .filter(
+          (promotion) =>
+            isActivePromotion(promotion) &&
+            isPromotionAvailableForTier(promotion, currentTier)
+        )
+        .slice(0, 8),
+    [currentTier, promotions]
   );
 
   const handleUsePromotion = useCallback(
@@ -655,7 +719,6 @@ export default function RewardsScreen() {
           account={summary?.loyalty ?? null}
           currentTier={currentTier}
           nextRule={nextRule}
-          tierRules={tierRules}
         />
 
         <View className="mx-4 mt-5">

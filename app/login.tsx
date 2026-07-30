@@ -39,6 +39,7 @@ export default function LoginScreen() {
 
     try {
       await login(phone, password);
+      router.dismissAll();
       if (params.redirect === "payment") {
         router.replace("/payment");
         return;

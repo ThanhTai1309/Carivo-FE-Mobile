@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -480,6 +480,10 @@ export default function BookingDetailScreen() {
           setActiveIncident(null);
         }
       } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          setBooking(null);
+          return;
+        }
         const message =
           error instanceof ApiError
             ? error.message
@@ -492,12 +496,6 @@ export default function BookingDetailScreen() {
     },
     [accessToken, bookingId]
   );
-
-  useEffect(() => {
-    if (isHydrated && isAuthenticated && bookingId) {
-      void loadData();
-    }
-  }, [isHydrated, isAuthenticated, bookingId, loadData]);
 
   // Auto-reload when screen regains focus (e.g. returned from payment-success)
   useFocusEffect(

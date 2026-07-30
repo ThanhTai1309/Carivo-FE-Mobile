@@ -102,6 +102,7 @@ export default function SettingsScreen() {
             text: "Đăng xuất",
             onPress: async () => {
               await logout();
+              router.dismissAll();
               router.replace("/login");
             },
           },
